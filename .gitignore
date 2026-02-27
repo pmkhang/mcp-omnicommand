@@ -1,0 +1,30 @@
+# Rust
+/target
+Cargo.lock
+# Cargo.lock nên được commit cho binary nhưng bỏ qua cho library. 
+# Dự án này có vẻ là binary dựa trên cấu trúc src/ (sẽ check kỹ hơn nếu cần).
+# Tuy nhiên, thông thường với MCP tools, lockfile nên được giữ. 
+# Tôi sẽ tạm để Cargo.lock là tùy chọn hoặc bỏ qua nếu user muốn. 
+# Theo tiêu chuẩn Rust: binary commit lock, library ignore lock.
+# Dự án mcp_cmd_rs trông giống tool/binary.
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+build_error.log
+
+# Environment
+.env
+.env.*
+
+# Temporary
+/tmp/
