@@ -46,32 +46,37 @@ struct Summary {
     size: u64,
 }
 
-#[allow(clippy::struct_excessive_bools)]
+struct FilterFlags {
+    show_hidden: bool,
+    use_gitignore: bool,
+}
+
+struct DisplayFlags {
+    dirs_first: bool,
+    case_sensitive: bool,
+}
+
 struct ListOptions {
     max_depth: Option<usize>,
     sort_by: String,
     order: String,
     pattern: Option<String>,
-    dirs_first: bool,
-    show_hidden: bool,
-    case_sensitive: bool,
-    use_gitignore: bool,
+    filter: FilterFlags,
+    display: DisplayFlags,
     limit: usize,
 }
 
 fn parse_args(arguments: &Value) -> ListOptions {
-    let limit_val = arguments
+    let limit = arguments
         .get("limit")
         .and_then(Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(200);
-    #[allow(clippy::cast_possible_truncation)]
-    let limit = limit_val as usize;
 
-    let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|d| {
-        #[allow(clippy::cast_possible_truncation)]
-        let val = d as usize;
-        val
-    });
+    let max_depth = arguments
+        .get("max_depth")
+        .and_then(Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok());
 
     ListOptions {
         max_depth,
@@ -89,22 +94,26 @@ fn parse_args(arguments: &Value) -> ListOptions {
             .get("pattern")
             .and_then(Value::as_str)
             .map(String::from),
-        dirs_first: arguments
-            .get("dirs_first")
-            .and_then(Value::as_bool)
-            .unwrap_or(true),
-        show_hidden: arguments
-            .get("show_hidden")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        case_sensitive: arguments
-            .get("case_sensitive")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        use_gitignore: arguments
-            .get("use_gitignore")
-            .and_then(Value::as_bool)
-            .unwrap_or(true),
+        filter: FilterFlags {
+            show_hidden: arguments
+                .get("show_hidden")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            use_gitignore: arguments
+                .get("use_gitignore")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        },
+        display: DisplayFlags {
+            dirs_first: arguments
+                .get("dirs_first")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            case_sensitive: arguments
+                .get("case_sensitive")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
         limit,
     }
 }
@@ -134,9 +143,9 @@ fn matches_pattern(name: &str, pattern: &str, case_sensitive: bool) -> bool {
 fn collect_entries(path_str: &str, options: &ListOptions, summary: &mut Summary) -> Vec<EntryInfo> {
     let mut entries = Vec::new();
     let walker = WalkBuilder::new(path_str)
-        .git_ignore(options.use_gitignore)
-        .hidden(!options.show_hidden)
-        .max_depth(options.max_depth.map(|d| d + 1))
+        .git_ignore(options.filter.use_gitignore)
+        .hidden(!options.filter.show_hidden)
+        .max_depth(options.max_depth)
         .build();
 
     for entry in walker.flatten() {
@@ -150,7 +159,7 @@ fn collect_entries(path_str: &str, options: &ListOptions, summary: &mut Summary)
         let matches = options
             .pattern
             .as_ref()
-            .is_none_or(|p| matches_pattern(name, p, options.case_sensitive));
+            .is_none_or(|p| matches_pattern(name, p, options.display.case_sensitive));
 
         if !matches {
             continue;
@@ -198,7 +207,7 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
     let mut entries = collect_entries(path_str, &options, &mut summary);
 
     entries.sort_by(|a, b| {
-        if options.dirs_first && a.entry_type != b.entry_type {
+        if options.display.dirs_first && a.entry_type != b.entry_type {
             if a.entry_type == "DIR" {
                 return Ordering::Less;
             }

@@ -73,6 +73,17 @@ async fn execute_with_shell_choice(
     }
 }
 
+struct BatchContext<'a> {
+    global_cwd: Option<&'a str>,
+    timeout: u64,
+    global_shell: Option<&'a str>,
+    background: bool,
+    wait_ms: u64,
+    log_file: Option<&'a str>,
+    run_parallel: bool,
+    continue_on_error: bool,
+}
+
 pub async fn run(arguments: &Value, default_cwd: Option<&str>) -> Result<Value, String> {
     let timeout = arguments
         .get("timeout")
@@ -114,8 +125,7 @@ pub async fn run(arguments: &Value, default_cwd: Option<&str>) -> Result<Value, 
 
     // Case 2: Batch commands
     if let Some(cmds) = arguments.get("commands").and_then(Value::as_array) {
-        return run_batch_commands(
-            cmds,
+        let ctx = BatchContext {
             global_cwd,
             timeout,
             global_shell,
@@ -124,8 +134,8 @@ pub async fn run(arguments: &Value, default_cwd: Option<&str>) -> Result<Value, 
             log_file,
             run_parallel,
             continue_on_error,
-        )
-        .await;
+        };
+        return run_batch_commands(cmds, ctx).await;
     }
 
     Err("Either 'command' or 'commands' must be provided".to_string())
@@ -153,19 +163,8 @@ async fn run_single_command(
     Ok(json!([{ "type": "text", "text": serde_json::to_string(&res).unwrap_or_default() }]))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn run_batch_commands(
-    cmds: &[Value],
-    global_cwd: Option<&str>,
-    timeout: u64,
-    global_shell: Option<&str>,
-    background: bool,
-    wait_ms: u64,
-    log_file: Option<&str>,
-    run_parallel: bool,
-    continue_on_error: bool,
-) -> Result<Value, String> {
-    if run_parallel {
+async fn run_batch_commands(cmds: &[Value], ctx: BatchContext<'_>) -> Result<Value, String> {
+    if ctx.run_parallel {
         let mut futures_list = Vec::new();
         for item in cmds {
             let cmd = item
@@ -176,16 +175,17 @@ async fn run_batch_commands(
             let cwd = item
                 .get("cwd")
                 .and_then(Value::as_str)
-                .or(global_cwd)
+                .or(ctx.global_cwd)
                 .map(String::from);
             let shell = item
                 .get("shell")
                 .and_then(Value::as_str)
-                .or(global_shell)
+                .or(ctx.global_shell)
                 .map(String::from);
-            let bg = background;
-            let w = wait_ms;
-            let lf = log_file.map(String::from);
+            let bg = ctx.background;
+            let w = ctx.wait_ms;
+            let lf = ctx.log_file.map(String::from);
+            let timeout = ctx.timeout;
 
             futures_list.push(async move {
                 let res = execute_with_shell_choice(
@@ -213,16 +213,26 @@ async fn run_batch_commands(
     let mut results = Vec::new();
     for item in cmds {
         let cmd = item.get("command").and_then(Value::as_str).unwrap_or("");
-        let cwd = item.get("cwd").and_then(Value::as_str).or(global_cwd);
-        let shell = item.get("shell").and_then(Value::as_str).or(global_shell);
+        let cwd = item.get("cwd").and_then(Value::as_str).or(ctx.global_cwd);
+        let shell = item
+            .get("shell")
+            .and_then(Value::as_str)
+            .or(ctx.global_shell);
 
-        let res =
-            execute_with_shell_choice(cmd, cwd, timeout, shell, background, wait_ms, log_file)
-                .await?;
+        let res = execute_with_shell_choice(
+            cmd,
+            cwd,
+            ctx.timeout,
+            shell,
+            ctx.background,
+            ctx.wait_ms,
+            ctx.log_file,
+        )
+        .await?;
         let success = res.exit_code == 0;
 
         results.push(json!({ "command": cmd, "result": json!(res) }));
-        if !success && !continue_on_error {
+        if !success && !ctx.continue_on_error {
             results.push(json!({"status": "Stopped due to command failure"}));
             break;
         }

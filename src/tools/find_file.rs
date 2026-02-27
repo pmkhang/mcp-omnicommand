@@ -190,10 +190,8 @@ fn parse_options(arguments: &Value) -> Result<SearchOptions<'_>, String> {
         max_size: arguments.get("max_size").and_then(Value::as_u64),
         limit: arguments
             .get("limit")
-            .and_then(|l| {
-                #[allow(clippy::cast_possible_truncation)]
-                l.as_u64().map(|v| v as usize)
-            })
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok())
             .unwrap_or(100),
         case_sensitive,
     })
