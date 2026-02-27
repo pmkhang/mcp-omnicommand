@@ -13,7 +13,8 @@ pub fn info() -> Value {
             "type": "object",
             "properties": {
                 "strategy": { "type": "string", "enum": ["port", "file", "process"], "description": "What to wait for" },
-                "target": { "type": "string", "description": "The port address (e.g. '127.0.0.1:8080'), file path, or process name/PID" },
+                "target": { "type": "string", "description": "Port address ('localhost:8080' or just '8080'), file path, or process name/PID" },
+                "state": { "type": "string", "enum": ["alive", "dead"], "default": "alive", "description": "Wait until process is alive (running) or dead (exited). Default: alive" },
                 "timeout": { "type": "number", "description": "Timeout in milliseconds", "default": 30000 },
                 "interval": { "type": "number", "description": "Polling interval in milliseconds", "default": 500 }
             },
@@ -39,25 +40,42 @@ pub async fn run(arguments: &Value) -> Result<Value, String> {
         .get("interval")
         .and_then(Value::as_u64)
         .unwrap_or(500);
+    let state = arguments
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("alive");
 
     let start_time = Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(interval_ms);
 
-    let mut sys = System::new_all();
+    let mut sys: Option<System> = None;
 
     while start_time.elapsed() < timeout {
         let success = match strategy {
-            "port" => TcpStream::connect(target).await.is_ok(),
+            "port" => {
+                let addr = if target.contains(':') {
+                    target.to_string()
+                } else {
+                    format!("127.0.0.1:{target}")
+                };
+                TcpStream::connect(&addr).await.is_ok()
+            }
             "file" => Path::new(target).exists(),
             "process" => {
+                let sys = sys.get_or_insert_with(System::new_all);
                 sys.refresh_processes(ProcessesToUpdate::All, true);
-                if let Ok(pid) = target.parse::<usize>() {
-                    sys.process(Pid::from(pid)).is_none()
+                let is_alive = if let Ok(pid) = target.parse::<usize>() {
+                    sys.process(Pid::from(pid)).is_some()
                 } else {
-                    !sys.processes()
+                    sys.processes()
                         .values()
                         .any(|p| p.name().to_string_lossy().contains(target))
+                };
+                if state == "alive" {
+                    is_alive
+                } else {
+                    !is_alive
                 }
             }
             _ => return Err(format!("Unknown strategy: {strategy}")),

@@ -22,7 +22,12 @@ pub struct CommandResponse {
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024; // 10MB
 
+/// Best-effort safety check. NOT a security boundary —
+/// simple string matching can be bypassed with minor variations
+/// (e.g. extra spaces, different flags). Callers should not rely
+/// on this as the sole protection against destructive commands.
 pub fn is_safe_command(cmd: &str) -> bool {
     let lower_cmd = cmd.to_lowercase();
     let blacklist = [
@@ -62,12 +67,18 @@ pub fn force_kill_tree(pid: u32) {
 
 #[cfg(not(windows))]
 pub fn force_kill_tree(pid: u32) {
-    let mut kill_cmd = Command::new("kill");
-    kill_cmd
+    // Try to kill entire process group first (negative PID = process group)
+    let _ = Command::new("kill")
+        .args(["-9", &format!("-{pid}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    // Fallback: kill the process itself in case it has no process group
+    let _ = Command::new("kill")
         .args(["-9", &pid.to_string()])
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _ = kill_cmd.status();
+        .stderr(Stdio::null())
+        .status();
 }
 
 fn truncate_to_bytes(s: &str, max_bytes: usize) -> String {
@@ -165,11 +176,10 @@ async fn monitor_process(
             Ok(Ok(output)) => {
                 let stdout_str = String::from_utf8_lossy(&output.stdout);
                 let stderr_str = String::from_utf8_lossy(&output.stderr);
-                let max_output_bytes = 10 * 1024 * 1024;
 
                 Ok(CommandResponse {
-                    stdout: truncate_to_bytes(&stdout_str, max_output_bytes),
-                    stderr: truncate_to_bytes(&stderr_str, max_output_bytes),
+                    stdout: truncate_to_bytes(&stdout_str, MAX_OUTPUT_BYTES),
+                    stderr: truncate_to_bytes(&stderr_str, MAX_OUTPUT_BYTES),
                     exit_code: output.status.code().unwrap_or(0),
                     timeout: false,
                     error: None,
@@ -210,7 +220,6 @@ pub async fn exec_cmd(
         } else {
             c.args(["-c", command_str]);
         }
-        #[cfg(windows)]
         c.creation_flags(CREATE_NO_WINDOW);
         c
     } else {
@@ -239,12 +248,10 @@ pub async fn exec_powershell(
 ) -> Result<CommandResponse, String> {
     validate_args(command_str, cwd_opt)?;
 
-    let utf16_bytes: Vec<u16> = command_str.encode_utf16().collect();
-    let mut u8_bytes = Vec::with_capacity(utf16_bytes.len() * 2);
-    for b in utf16_bytes {
-        u8_bytes.push((b & 0xFF) as u8);
-        u8_bytes.push((b >> 8) as u8);
-    }
+    let u8_bytes: Vec<u8> = command_str
+        .encode_utf16()
+        .flat_map(|b| [(b & 0xFF) as u8, (b >> 8) as u8])
+        .collect();
     let encoded = STANDARD.encode(&u8_bytes);
 
     let mut cmd = if cfg!(windows) {

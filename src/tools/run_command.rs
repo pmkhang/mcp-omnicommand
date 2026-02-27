@@ -1,6 +1,8 @@
 use crate::process::{CommandResponse, exec_cmd, exec_powershell};
 use futures::future;
 use serde_json::{Value, json};
+use std::future::Future;
+use std::pin::Pin;
 
 pub fn info() -> Value {
     json!({
@@ -18,7 +20,9 @@ pub fn info() -> Value {
                         "properties": {
                             "command": { "type": "string" },
                             "cwd": { "type": "string" },
-                            "shell": { "type": "string", "description": "Optional specific shell for this command." }
+                            "shell": { "type": "string", "description": "Optional specific shell for this command." },
+                            "background": { "type": "boolean", "description": "Override global background for this command." },
+                            "logFile": { "type": "string", "description": "Override global logFile for this command." }
                         },
                         "required": ["command"]
                     }
@@ -30,7 +34,7 @@ pub fn info() -> Value {
                 "cwd": { "type": "string", "description": "Default working directory for all commands." },
                 "timeout": { "type": "number", "description": "Timeout in ms per command. Defaults to 30000." },
                 "continueOnError": { "type": "boolean", "description": "For multiple commands, whether to continue if one fails." },
-                "runParallel": { "type": "boolean", "description": "Execute multiple commands in parallel." },
+                "runParallel": { "type": "boolean", "description": "Execute multiple commands in parallel. Note: continueOnError must be true when runParallel is true." },
                 "background": { "type": "boolean", "description": "Run the command in the background." },
                 "logFile": { "type": "string", "description": "File path to redirect stdout and stderr to." }
             }
@@ -115,67 +119,115 @@ pub async fn run(arguments: &Value, default_cwd: Option<&str>) -> Result<Value, 
 }
 
 async fn run_batch_commands(cmds: &[Value], ctx: BatchContext<'_>) -> Result<Value, String> {
-    if ctx.run_parallel {
-        let mut futures_list = Vec::new();
-        for item in cmds {
-            let cmd = item
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let cwd = item
-                .get("cwd")
-                .and_then(Value::as_str)
-                .or(ctx.global_cwd)
-                .map(String::from);
-            let shell = item
-                .get("shell")
-                .and_then(Value::as_str)
-                .or(ctx.global_shell)
-                .map(String::from);
-            let bg = ctx.background;
-            let lf = ctx.log_file.map(String::from);
-            let timeout = ctx.timeout;
-
-            futures_list.push(async move {
-                let res = execute_with_shell_choice(
-                    &cmd,
-                    cwd.as_deref(),
-                    timeout,
-                    shell.as_deref(),
-                    bg,
-                    lf.as_deref(),
-                )
-                .await;
-                json!({
-                    "command": cmd,
-                    "result": match res { Ok(r) => json!(r), Err(e) => json!({"error": e}) }
-                })
-            });
-        }
-        let results = future::join_all(futures_list).await;
-        return Ok(
-            json!([{ "type": "text", "text": serde_json::to_string(&results).unwrap_or_default() }]),
+    if ctx.run_parallel && !ctx.continue_on_error && cmds.len() > 1 {
+        return Err(
+            "`continueOnError: false` has no effect with `runParallel: true`. \
+             Either set `continueOnError: true` or disable `runParallel`."
+                .to_string(),
         );
     }
 
+    if ctx.run_parallel {
+        run_parallel_commands(cmds, &ctx).await
+    } else {
+        run_sequential_commands(cmds, &ctx).await
+    }
+}
+
+async fn run_parallel_commands(cmds: &[Value], ctx: &BatchContext<'_>) -> Result<Value, String> {
+    let mut futures_list: Vec<Pin<Box<dyn Future<Output = Value>>>> = Vec::new();
+    for item in cmds {
+        let cmd = match item.get("command").and_then(Value::as_str) {
+            Some(c) if !c.is_empty() => c.to_string(),
+            _ => {
+                futures_list.push(Box::pin(async move {
+                    json!({ "error": "Missing or empty 'command' field in batch item" })
+                }) as _);
+                continue;
+            }
+        };
+        let cwd = item
+            .get("cwd")
+            .and_then(Value::as_str)
+            .or(ctx.global_cwd)
+            .map(String::from);
+        let shell = item
+            .get("shell")
+            .and_then(Value::as_str)
+            .or(ctx.global_shell)
+            .map(String::from);
+        let bg = item
+            .get("background")
+            .and_then(Value::as_bool)
+            .unwrap_or(ctx.background);
+        let lf = item
+            .get("logFile")
+            .and_then(Value::as_str)
+            .or(ctx.log_file)
+            .map(String::from);
+        let timeout = ctx.timeout;
+
+        futures_list.push(Box::pin(async move {
+            let res = execute_with_shell_choice(
+                &cmd,
+                cwd.as_deref(),
+                timeout,
+                shell.as_deref(),
+                bg,
+                lf.as_deref(),
+            )
+            .await;
+            json!({
+                "command": cmd,
+                "result": match res { Ok(r) => json!(r), Err(e) => json!({"error": e}) }
+            })
+        }) as _);
+    }
+    let results = future::join_all(futures_list).await;
+    Ok(json!([{ "type": "text", "text": serde_json::to_string(&results).unwrap_or_default() }]))
+}
+
+async fn run_sequential_commands(cmds: &[Value], ctx: &BatchContext<'_>) -> Result<Value, String> {
     let mut results = Vec::new();
     for item in cmds {
-        let cmd = item.get("command").and_then(Value::as_str).unwrap_or("");
+        let cmd = match item.get("command").and_then(Value::as_str) {
+            Some(c) if !c.is_empty() => c,
+            _ => {
+                results.push(json!({ "error": "Missing or empty 'command' field in batch item" }));
+                if !ctx.continue_on_error {
+                    break;
+                }
+                continue;
+            }
+        };
         let cwd = item.get("cwd").and_then(Value::as_str).or(ctx.global_cwd);
         let shell = item
             .get("shell")
             .and_then(Value::as_str)
             .or(ctx.global_shell);
+        let background = item
+            .get("background")
+            .and_then(Value::as_bool)
+            .unwrap_or(ctx.background);
+        let log_file = item.get("logFile").and_then(Value::as_str).or(ctx.log_file);
 
         let res =
-            execute_with_shell_choice(cmd, cwd, ctx.timeout, shell, ctx.background, ctx.log_file)
-                .await?;
-        let success = res.exit_code == 0;
-
+            match execute_with_shell_choice(cmd, cwd, ctx.timeout, shell, background, log_file)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    results.push(json!({ "command": cmd, "error": e }));
+                    if !ctx.continue_on_error {
+                        results.push(json!({ "status": "Stopped due to command failure" }));
+                        break;
+                    }
+                    continue;
+                }
+            };
         results.push(json!({ "command": cmd, "result": json!(res) }));
-        if !success && !ctx.continue_on_error {
-            results.push(json!({"status": "Stopped due to command failure"}));
+        if res.exit_code != 0 && !ctx.continue_on_error {
+            results.push(json!({ "status": "Stopped due to command failure" }));
             break;
         }
     }

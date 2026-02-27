@@ -3,7 +3,12 @@ use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 use serde_json::{Value, json};
+use std::sync::LazyLock;
 use std::time::Duration;
+
+const MAX_RESPONSE_BYTES: usize = 1_000_000; // 1MB
+
+static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 pub fn info() -> Value {
     json!({
@@ -25,6 +30,10 @@ pub fn info() -> Value {
                 "body": {
                     "type": "string",
                     "description": "Request body for POST/PUT/PATCH requests"
+                },
+                "json": {
+                    "type": "object",
+                    "description": "JSON request body — automatically serializes to JSON string and sets Content-Type: application/json. Use instead of 'body' for JSON APIs."
                 },
                 "timeout": {
                     "type": "number",
@@ -55,12 +64,9 @@ pub async fn run(arguments: &Value) -> Result<Value, String> {
 
     let method = Method::from_bytes(method_str.as_bytes()).map_err(|_| "Invalid HTTP method")?;
 
-    let client = Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
-
-    let mut request_builder = client.request(method, url);
+    let mut request_builder = HTTP_CLIENT
+        .request(method, url)
+        .timeout(Duration::from_millis(timeout_ms));
 
     if let Some(headers_obj) = arguments.get("headers").and_then(|v| v.as_object()) {
         let mut headers = HeaderMap::new();
@@ -79,6 +85,8 @@ pub async fn run(arguments: &Value) -> Result<Value, String> {
 
     if let Some(body) = body_str {
         request_builder = request_builder.body(body.to_string());
+    } else if let Some(json_val) = arguments.get("json") {
+        request_builder = request_builder.json(json_val);
     }
 
     let response = request_builder
@@ -87,15 +95,22 @@ pub async fn run(arguments: &Value) -> Result<Value, String> {
         .map_err(|e| format!("Request failed: {e}"))?;
 
     let status = response.status().as_u16();
-    let text_content = response.text().await.unwrap_or_default();
+    let raw_text = response.text().await.unwrap_or_default();
+    let response_truncated = raw_text.len() > MAX_RESPONSE_BYTES;
+    let text_content = if response_truncated {
+        &raw_text[..MAX_RESPONSE_BYTES]
+    } else {
+        &raw_text
+    };
 
     // Try to parse as JSON for prettier output if possible
-    let body_json = serde_json::from_str::<Value>(&text_content).unwrap_or(json!(text_content));
+    let body_json = serde_json::from_str::<Value>(text_content).unwrap_or(json!(text_content));
 
-    let result = json!({
-        "status": status,
-        "body": body_json
-    });
+    let result = if response_truncated {
+        json!({ "status": status, "body": body_json, "truncated": true })
+    } else {
+        json!({ "status": status, "body": body_json })
+    };
 
     Ok(
         json!([{ "type": "text", "text": serde_json::to_string_pretty(&result).unwrap_or_default() }]),

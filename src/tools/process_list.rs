@@ -1,6 +1,20 @@
 use serde_json::{Value, json};
 use sysinfo::System;
 
+// All names must be lowercase to match the lowercased process name
+const DEFAULT_PROCESS_NAMES: &[&str] = &[
+    "cmd.exe",
+    "cmd",
+    "conhost.exe",
+    "powershell.exe",
+    "pwsh",
+    "sh",
+    "bash",
+    "zsh",
+    "node.exe",
+    "node",
+];
+
 pub fn info() -> Value {
     json!({
         "name": "process_list",
@@ -8,7 +22,8 @@ pub fn info() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "filter": { "type": "string", "description": "Filter by process name" }
+                "filter": { "type": "string", "description": "Filter by process name" },
+                "all": { "type": "boolean", "description": "List all running processes. When false (default), only lists common shell and runtime processes (cmd, powershell, bash, node, etc.)." }
             }
         }
     })
@@ -20,27 +35,23 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_lowercase();
+    let show_all = arguments
+        .get("all")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    let sys = System::new_all();
 
     let mut processes = Vec::new();
     for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
 
-        let matches_filter = if filter.is_empty() {
-            name == "cmd.exe"
-                || name == "cmd"
-                || name == "conhost.exe"
-                || name == "powershell.exe"
-                || name == "pwsh"
-                || name == "sh"
-                || name == "bash"
-                || name == "zsh"
-                || name == "node.exe"
-                || name == "node"
-        } else {
+        let matches_filter = if !filter.is_empty() {
             name.contains(&filter)
+        } else if show_all {
+            true
+        } else {
+            DEFAULT_PROCESS_NAMES.contains(&name.as_str())
         };
 
         if matches_filter {
@@ -54,8 +65,10 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
             processes.push(json!({
                 "ProcessId": pid.as_u32(),
                 "Name": process.name().to_string_lossy(),
-                "CreationDate": process.start_time(),
+                "start_time_unix": process.start_time(),
                 "CommandLine": cmd_line,
+                "MemoryKB": process.memory() / 1024,
+                "Status": format!("{:?}", process.status()),
             }));
         }
     }

@@ -32,32 +32,49 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         .len();
 
     let mut reader = BufReader::new(file);
-    let mut lines = Vec::new();
 
     if file_size == 0 {
-        return Ok(json!({ "lines": lines }));
+        return Ok(json!({ "lines": [] }));
     }
 
-    // Heuristic: start seeking from 200 bytes per line from the end
-    let bytes_to_jump = lines_to_read_u64.saturating_mul(200);
-    let seek_start = file_size.saturating_sub(bytes_to_jump);
+    let mut multiplier = 1u64;
+    let lines;
+    let truncated;
 
-    reader
-        .get_mut()
-        .seek(SeekFrom::Start(seek_start))
-        .map_err(|e| format!("Seek failed: {e}"))?;
+    loop {
+        let bytes_to_jump = lines_to_read_u64.saturating_mul(200 * multiplier);
+        let seek_start = file_size.saturating_sub(bytes_to_jump);
 
-    let mut all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+        reader
+            .seek(SeekFrom::Start(seek_start))
+            .map_err(|e| format!("Seek failed: {e}"))?;
 
-    // Take the last N lines from what we read
-    let start_idx = all_lines.len().saturating_sub(lines_to_read);
-    lines = all_lines.drain(start_idx..).collect();
+        let all_lines: Vec<String> = (&mut reader).lines().map_while(Result::ok).collect();
+
+        if all_lines.len() >= lines_to_read || seek_start == 0 {
+            truncated = seek_start > 0;
+            let start_idx = all_lines.len().saturating_sub(lines_to_read);
+            lines = all_lines
+                .into_iter()
+                .skip(start_idx)
+                .collect::<Vec<String>>();
+            break;
+        }
+
+        multiplier *= 2;
+
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(|e| format!("Seek failed: {e}"))?;
+    }
 
     Ok(json!([{
         "type": "text",
         "text": serde_json::to_string(&json!({
             "path": path,
-            "lines": lines
+            "lines": lines,
+            "total_lines_returned": lines.len(),
+            "truncated": truncated
         })).unwrap_or_default()
     }]))
 }

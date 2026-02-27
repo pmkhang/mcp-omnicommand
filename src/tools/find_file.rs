@@ -3,7 +3,7 @@ use ignore::WalkBuilder;
 use regex::Regex;
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 pub fn info() -> Value {
@@ -24,7 +24,8 @@ pub fn info() -> Value {
                 "min_size": { "type": "number", "description": "Minimum file size in bytes" },
                 "max_size": { "type": "number", "description": "Maximum file size in bytes" },
                 "limit": { "type": "number", "description": "Maximum number of results to return", "default": 100 },
-                "use_gitignore": { "type": "boolean", "description": "Respect .gitignore rules", "default": true }
+                "use_gitignore": { "type": "boolean", "description": "Respect .gitignore rules", "default": true },
+                "show_hidden": { "type": "boolean", "description": "Include hidden files and directories in search. Default: false.", "default": false }
             },
             "required": ["path"]
         }
@@ -54,9 +55,11 @@ struct FlatMatch {
 
 struct SearchOptions<'a> {
     pattern: Option<&'a str>,
+    pattern_lower: Option<String>,
     name_regex: Option<Regex>,
     name_glob: Option<Pattern>,
     content: Option<&'a str>,
+    content_lower: Option<String>,
     content_regex: Option<Regex>,
     match_per_line: bool,
     extension: Option<&'a str>,
@@ -66,9 +69,36 @@ struct SearchOptions<'a> {
     case_sensitive: bool,
 }
 
+fn is_likely_binary(path: &Path) -> bool {
+    // Check by extension first (fast path)
+    let binary_exts = [
+        "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "exe", "dll", "so", "dylib", "bin",
+        "zip", "gz", "tar", "rar", "7z", "pdf", "wasm", "class", "pyc", "mp3", "mp4", "avi", "mov",
+        "mkv", "ttf", "otf", "woff", "woff2",
+    ];
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| binary_exts.contains(&ext.to_lowercase().as_str()))
+    {
+        return true;
+    }
+
+    // Fallback: read first 512 bytes and check for null bytes
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut buffer = [0u8; 512];
+    let Ok(n) = Read::read(&mut file, &mut buffer) else {
+        return false;
+    };
+    buffer[..n].contains(&0u8)
+}
+
 fn search_file_content(
     path: &Path,
     content: &str,
+    content_lower: Option<&str>,
     content_regex: Option<&Regex>,
     case_sensitive: bool,
 ) -> Vec<ContentMatch> {
@@ -89,7 +119,9 @@ fn search_file_content(
                 if case_sensitive {
                     line_text.contains(content)
                 } else {
-                    line_text.to_lowercase().contains(&content.to_lowercase())
+                    line_text
+                        .to_lowercase()
+                        .contains(content_lower.unwrap_or(content))
                 }
             }
         };
@@ -134,7 +166,9 @@ fn matches_filters(path: &Path, size: u64, options: &SearchOptions<'_>) -> bool 
         } else if options.case_sensitive {
             filename.contains(p)
         } else {
-            filename.to_lowercase().contains(&p.to_lowercase())
+            filename
+                .to_lowercase()
+                .contains(options.pattern_lower.as_deref().unwrap_or(p))
         };
 
         if !name_matches {
@@ -152,6 +186,12 @@ fn parse_options(arguments: &Value) -> Result<SearchOptions<'_>, String> {
         .get("case_sensitive")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+
+    let pattern_lower = if case_sensitive {
+        None
+    } else {
+        pattern.map(str::to_lowercase)
+    };
 
     let mut name_regex = None;
     let mut name_glob = None;
@@ -178,6 +218,12 @@ fn parse_options(arguments: &Value) -> Result<SearchOptions<'_>, String> {
         .get("is_regex")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+
+    let content_lower = if case_sensitive {
+        None
+    } else {
+        content.map(str::to_lowercase)
+    };
     if let (Some(c), true) = (content, is_regex) {
         let re_str = if case_sensitive {
             c.to_string()
@@ -190,9 +236,11 @@ fn parse_options(arguments: &Value) -> Result<SearchOptions<'_>, String> {
 
     Ok(SearchOptions {
         pattern,
+        pattern_lower,
         name_regex,
         name_glob,
         content,
+        content_lower,
         content_regex,
         match_per_line: arguments
             .get("match_per_line")
@@ -220,8 +268,13 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         .get("use_gitignore")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    let show_hidden = arguments
+        .get("show_hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let mut results = Vec::new();
     let mut flat_results = Vec::new();
+    let mut truncated = false;
 
     if !Path::new(path_str).exists() {
         return Err(format!("Path does not exist: {path_str}"));
@@ -229,13 +282,14 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
 
     for entry in WalkBuilder::new(path_str)
         .git_ignore(use_gitignore)
-        .hidden(false)
+        .hidden(!show_hidden)
         .build()
         .flatten()
     {
         if (options.match_per_line && flat_results.len() >= options.limit)
             || (!options.match_per_line && results.len() >= options.limit)
         {
+            truncated = true;
             break;
         }
 
@@ -255,9 +309,13 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
 
         let mut file_matches = Vec::new();
         if let Some(c) = options.content {
+            if is_likely_binary(path) {
+                continue;
+            }
             file_matches = search_file_content(
                 path,
                 c,
+                options.content_lower.as_deref(),
                 options.content_regex.as_ref(),
                 options.case_sensitive,
             );
@@ -274,8 +332,12 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
                     line_content: m.line_content,
                 });
                 if flat_results.len() >= options.limit {
+                    truncated = true;
                     break;
                 }
+            }
+            if truncated {
+                break;
             }
         } else {
             results.push(FileResult {
@@ -287,9 +349,17 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
     }
 
     let final_output = if options.match_per_line {
-        json!(flat_results)
+        json!({
+            "results": flat_results,
+            "truncated": truncated,
+            "limit": options.limit
+        })
     } else {
-        json!(results)
+        json!({
+            "results": results,
+            "truncated": truncated,
+            "limit": options.limit
+        })
     };
 
     Ok(

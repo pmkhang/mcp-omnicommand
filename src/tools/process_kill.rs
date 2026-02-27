@@ -1,11 +1,33 @@
 use serde_json::{Value, json};
+#[cfg(windows)]
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sysinfo::{Pid, System};
+use sysinfo::{Pid, Process, System};
+
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn kill_process(process: &Process, pid_u32: u32, force: bool) -> bool {
+    if force {
+        #[cfg(windows)]
+        {
+            Command::new("taskkill")
+                .args(["/F", "/PID", &pid_u32.to_string()])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
+        #[cfg(not(windows))]
+        {
+            process.kill_with(sysinfo::Signal::Kill).unwrap_or(false)
+        }
+    } else {
+        process.kill()
+    }
+}
 
 pub fn info() -> Value {
     json!({
         "name": "process_kill",
-        "description": "Kill a process by PID, name, or cleanup orphaned/hanging shells.",
+        "description": "Force kill: SIGKILL on Linux/macOS, taskkill /F on Windows. Default false sends SIGTERM.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -28,13 +50,12 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let _force = arguments
+    let force = arguments
         .get("force")
         .and_then(Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
 
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    let sys = System::new_all();
 
     let mut killed_count = 0;
     let mut details = Vec::new();
@@ -74,14 +95,23 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
                 }
                 if now > start_time {
                     let age = now - start_time;
-                    if age >= max_age_seconds && process.kill() {
-                        killed_count += 1;
-                        details.push(format!(
-                            "Cleaned up PID {} ({}, Age: {}s)",
-                            pid.as_u32(),
-                            name,
-                            age
-                        ));
+                    if age >= max_age_seconds {
+                        if kill_process(process, pid.as_u32(), force) {
+                            killed_count += 1;
+                            details.push(format!(
+                                "Cleaned up PID {} ({}, Age: {}s)",
+                                pid.as_u32(),
+                                name,
+                                age
+                            ));
+                        } else {
+                            details.push(format!(
+                                "Failed to kill PID {} ({}, Age: {}s)",
+                                pid.as_u32(),
+                                name,
+                                age
+                            ));
+                        }
                     }
                 }
             }
@@ -90,7 +120,7 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         let pid = Pid::from(usize::try_from(p).unwrap_or(usize::MAX));
         if let Some(process) = sys.process(pid) {
             let proc_name = process.name().to_string_lossy().into_owned();
-            if process.kill() {
+            if kill_process(process, pid.as_u32(), force) {
                 killed_count += 1;
                 details.push(format!("Killed PID {p} ({proc_name})"));
             } else {
@@ -103,9 +133,9 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         let target_name = n.to_lowercase();
         for (pid, process) in sys.processes() {
             let proc_name = process.name().to_string_lossy().to_lowercase();
-            if proc_name.contains(&target_name) || proc_name == target_name {
+            if proc_name.contains(&target_name) {
                 let actual_name = process.name().to_string_lossy().into_owned();
-                if process.kill() {
+                if kill_process(process, pid.as_u32(), force) {
                     killed_count += 1;
                     details.push(format!("Killed PID {} ({actual_name})", pid.as_u32()));
                 }
@@ -115,11 +145,11 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         return Err("Provide 'pid', 'name', or set 'cleanup' to true".to_string());
     }
 
-    if killed_count == 0 {
+    if killed_count == 0 && details.is_empty() {
         return Ok(json!([{ "type": "text", "text": "No matching processes found." }]));
     }
 
     Ok(
-        json!([{ "type": "text", "text": format!("Affected {killed_count} process(es):\n{}", details.join("\n")) }]),
+        json!([{ "type": "text", "text": format!("Killed {killed_count} process(es):\n{}", details.join("\n")) }]),
     )
 }

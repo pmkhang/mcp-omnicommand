@@ -1,4 +1,3 @@
-use glob::Pattern;
 use ignore::WalkBuilder;
 use serde_json::{Value, json};
 use std::cmp::Ordering;
@@ -17,7 +16,7 @@ pub fn info() -> Value {
                 "max_depth": { "type": "number", "description": "Maximum recursion depth (0 for current directory only)", "default": 0 },
                 "sort_by": { "type": "string", "enum": ["name", "size", "modified"], "description": "Field to sort by", "default": "name" },
                 "order": { "type": "string", "enum": ["asc", "desc"], "description": "Sort order", "default": "asc" },
-                "dirs_first": { "type": "boolean", "description": "List directories before files", "default": true },
+                "dirs_first": { "type": "boolean", "description": "List directories before files regardless of sort order. Default: true.", "default": true },
                 "show_hidden": { "type": "boolean", "description": "Show hidden files", "default": false },
                 "pattern": { "type": "string", "description": "Filter items by name pattern (substring or glob)" },
                 "case_sensitive": { "type": "boolean", "description": "Case sensitive matching for pattern", "default": false },
@@ -43,7 +42,12 @@ struct EntryInfo {
 struct Summary {
     files: u64,
     dirs: u64,
-    size: u64,
+    total_file_size: u64,
+}
+
+enum CompiledPattern {
+    Glob(glob::Pattern),
+    Substring(String),
 }
 
 struct FilterFlags {
@@ -60,7 +64,7 @@ struct ListOptions {
     max_depth: Option<usize>,
     sort_by: String,
     order: String,
-    pattern: Option<String>,
+    compiled_pattern: Option<CompiledPattern>,
     filter: FilterFlags,
     display: DisplayFlags,
     limit: usize,
@@ -76,7 +80,39 @@ fn parse_args(arguments: &Value) -> ListOptions {
     let max_depth = arguments
         .get("max_depth")
         .and_then(Value::as_u64)
-        .and_then(|v| usize::try_from(v).ok());
+        .and_then(|v| usize::try_from(v).ok())
+        .map(|d| d + 1); // shift: user's 0 = current dir only → WalkBuilder's 1
+
+    let pattern = arguments
+        .get("pattern")
+        .and_then(Value::as_str)
+        .map(String::from);
+
+    let case_sensitive = arguments
+        .get("case_sensitive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let compiled_pattern = pattern.as_ref().map(|p| {
+        if p.contains(['*', '?', '[']) {
+            glob::Pattern::new(p).map_or_else(
+                |_| {
+                    CompiledPattern::Substring(if case_sensitive {
+                        p.clone()
+                    } else {
+                        p.to_lowercase()
+                    })
+                },
+                CompiledPattern::Glob,
+            )
+        } else {
+            CompiledPattern::Substring(if case_sensitive {
+                p.clone()
+            } else {
+                p.to_lowercase()
+            })
+        }
+    });
 
     ListOptions {
         max_depth,
@@ -90,10 +126,7 @@ fn parse_args(arguments: &Value) -> ListOptions {
             .and_then(Value::as_str)
             .unwrap_or("asc")
             .to_string(),
-        pattern: arguments
-            .get("pattern")
-            .and_then(Value::as_str)
-            .map(String::from),
+        compiled_pattern,
         filter: FilterFlags {
             show_hidden: arguments
                 .get("show_hidden")
@@ -118,25 +151,22 @@ fn parse_args(arguments: &Value) -> ListOptions {
     }
 }
 
-fn matches_pattern(name: &str, pattern: &str, case_sensitive: bool) -> bool {
-    let is_glob = pattern.contains(['*', '?', '[']);
-    if is_glob {
-        let Ok(p) = Pattern::new(pattern) else {
-            return false;
-        };
-        return p.matches_with(
+fn matches_pattern(name: &str, pattern: &CompiledPattern, case_sensitive: bool) -> bool {
+    match pattern {
+        CompiledPattern::Glob(p) => p.matches_with(
             name,
             glob::MatchOptions {
                 case_sensitive,
                 ..Default::default()
             },
-        );
-    }
-
-    if case_sensitive {
-        name.contains(pattern)
-    } else {
-        name.to_lowercase().contains(&pattern.to_lowercase())
+        ),
+        CompiledPattern::Substring(s) => {
+            if case_sensitive {
+                name.contains(s.as_str())
+            } else {
+                name.to_lowercase().contains(s.as_str())
+            }
+        }
     }
 }
 
@@ -157,7 +187,7 @@ fn collect_entries(path_str: &str, options: &ListOptions, summary: &mut Summary)
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         let matches = options
-            .pattern
+            .compiled_pattern
             .as_ref()
             .is_none_or(|p| matches_pattern(name, p, options.display.case_sensitive));
 
@@ -178,7 +208,7 @@ fn collect_entries(path_str: &str, options: &ListOptions, summary: &mut Summary)
             summary.dirs += 1;
         } else {
             summary.files += 1;
-            summary.size += size;
+            summary.total_file_size += size;
         }
 
         entries.push(EntryInfo {
@@ -236,7 +266,9 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         "text": serde_json::to_string_pretty(&json!({
             "summary": summary,
             "items": entries,
-            "truncated": total_found > options.limit
+            "truncated": total_found > options.limit,
+            "total_found": total_found,
+            "limit": options.limit
         })).unwrap_or_default()
     }]))
 }
