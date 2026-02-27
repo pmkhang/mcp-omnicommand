@@ -53,8 +53,11 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
     let start_idx = all_lines.len().saturating_sub(lines_to_read);
     lines = all_lines.drain(start_idx..).collect();
 
-    Ok(json!({
-        "path": path,
-        "lines": lines
-    }))
+    Ok(json!([{
+        "type": "text",
+        "text": serde_json::to_string(&json!({
+            "path": path,
+            "lines": lines
+        })).unwrap_or_default()
+    }]))
 }

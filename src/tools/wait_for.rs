@@ -64,10 +64,13 @@ pub async fn run(arguments: &Value) -> Result<Value, String> {
         };
 
         if success {
-            return Ok(json!({
-                "status": "success",
-                "elapsed_ms": u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX)
-            }));
+            return Ok(json!([{
+                "type": "text",
+                "text": serde_json::to_string(&json!({
+                    "status": "success",
+                    "elapsed_ms": u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX)
+                })).unwrap_or_default()
+            }]));
         }
 
         sleep(interval).await;
