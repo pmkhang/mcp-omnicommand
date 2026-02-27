@@ -3,8 +3,11 @@ mod tools;
 
 use serde_json::{Value, json};
 use std::env;
+use std::io::{Write, stdout};
 use std::process::exit;
 use tokio::io::{AsyncBufReadExt, BufReader, stdin};
+
+const SERVER_VERSION: &str = "1.1.0";
 
 #[tokio::main]
 async fn main() {
@@ -32,7 +35,7 @@ async fn run_standalone_cli(args: &[String]) {
 
     // Xử lý cờ phiên bản
     if tool_name == "--version" || tool_name == "-v" {
-        println!("Omnicommand version 1.0.0");
+        println!("Omnicommand version {SERVER_VERSION}");
         return;
     }
 
@@ -43,23 +46,37 @@ async fn run_standalone_cli(args: &[String]) {
     while i < args.len() {
         let arg = &args[i];
         if arg.starts_with("--") {
-            let key = arg.trim_start_matches("--");
-            if i + 1 < args.len() {
-                let val = &args[i + 1];
-                // Thử parse thành số hoặc boolean nếu có thể
-                if let Ok(num) = val.parse::<u64>() {
-                    arguments[key] = json!(num);
-                } else if val == "true" {
-                    arguments[key] = json!(true);
-                } else if val == "false" {
-                    arguments[key] = json!(false);
-                } else {
-                    arguments[key] = json!(val);
-                }
+            // Handle both --key value and --key=value formats
+            let (key, val_opt) = if arg.contains('=') {
+                let parts: Vec<&str> = arg.splitn(2, '=').collect();
+                (
+                    parts[0].trim_start_matches("--"),
+                    Some(parts[1].to_string()),
+                )
+            } else {
+                (arg.trim_start_matches("--"), None)
+            };
+
+            let val = if let Some(v) = val_opt {
+                i += 1;
+                v
+            } else if i + 1 < args.len() && !args[i + 1].starts_with("--") {
                 i += 2;
+                args[i - 1].clone()
             } else {
                 arguments[key] = json!(true);
                 i += 1;
+                continue;
+            };
+
+            if let Ok(num) = val.parse::<u64>() {
+                arguments[key] = json!(num);
+            } else if val == "true" {
+                arguments[key] = json!(true);
+            } else if val == "false" {
+                arguments[key] = json!(false);
+            } else {
+                arguments[key] = json!(val);
             }
         } else {
             i += 1;
@@ -90,7 +107,8 @@ async fn handle_rpc_message(msg: &Value, default_cwd: &mut Option<String>) {
     let id = msg.get("id");
     let method = msg.get("method").and_then(Value::as_str);
 
-    // Nếu là notification (id = null or missing), bỏ qua rpc đơn giản
+    // Notifications (no id) are intentionally ignored —
+    // e.g. notifications/initialized, notifications/cancelled
     let Some(id_val) = id else {
         return;
     };
@@ -145,7 +163,7 @@ fn handle_initialize(id: &Value, msg: &Value, default_cwd: &mut Option<String>) 
         "result": {
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "Omnicommand", "version": "1.0.0" }
+            "serverInfo": { "name": "Omnicommand", "version": SERVER_VERSION }
         }
     });
     send_response(&response);
@@ -189,5 +207,6 @@ async fn handle_tools_call(id: &Value, msg: &Value, default_cwd: Option<&str>) {
 fn send_response(resp: &Value) {
     if let Ok(json_str) = serde_json::to_string(resp) {
         println!("{json_str}");
+        let _ = stdout().flush();
     }
 }
