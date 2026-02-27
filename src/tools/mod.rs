@@ -6,6 +6,8 @@ pub mod list_directory;
 pub mod process_kill;
 pub mod process_list;
 pub mod run_command;
+pub mod tail_file;
+pub mod wait_for;
 
 pub fn get_tools() -> Value {
     json!([
@@ -15,6 +17,8 @@ pub fn get_tools() -> Value {
         process_kill::info(),
         list_directory::info(),
         find_file::info(),
+        tail_file::info(),
+        wait_for::info(),
     ])
 }
 
@@ -30,6 +34,8 @@ pub async fn handle_tool_call(
         "process_kill" => process_kill::run(arguments),
         "list_directory" => list_directory::run(arguments),
         "find_file" => find_file::run(arguments),
+        "tail_file" => tail_file::run(arguments),
+        "wait_for" => wait_for::run(arguments).await,
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
