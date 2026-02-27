@@ -75,7 +75,6 @@ omnicommand --version
 | `process_list`    | List running processes.           | `filter`                                                   |
 | `process_kill`    | Kill a process by PID or name.    | `pid`, `name`, `force`                                     |
 | `process_cleanup` | Clean up hanging shell processes. | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
-| `system_info`     | Get OS, RAM, User, Shell info.    | (None)                                                     |
 
 ## 📖 Advanced Examples
 

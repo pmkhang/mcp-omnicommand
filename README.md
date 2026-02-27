@@ -72,7 +72,6 @@ omnicommand process_kill --name "bun"
 | `process_list`    | Liệt kê các tiến trình đang chạy.     | `filter`                                                   |
 | `process_kill`    | Tắt tiến trình bằng PID hoặc tên.     | `pid`, `name`, `force`                                     |
 | `process_cleanup` | Dọn dẹp các tiến trình shell bị treo. | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
-| `system_info`     | Lấy thông tin OS, RAM, User, Shell.   | (None)                                                     |
 
 ## 📖 Ví dụ nâng cao
 
