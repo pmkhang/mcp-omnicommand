@@ -79,7 +79,7 @@ omnicommand --version
 | `process_kill`    | Kill a process by PID or name.      | `pid`, `name`, `force`                                     |
 | `process_cleanup` | Clean up hanging shell processes.   | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
 | `list_directory`  | List directory context (gitignore). | `path`, `max_depth`, `dirs_first`, `pattern`               |
-| `find_file`       | Find files by name, regex, content  | `path`, `pattern`, `content`, `is_regex`                   |
+| `find_file`       | Find files by name, regex, content  | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
 
 ## 📖 Advanced Examples
 
