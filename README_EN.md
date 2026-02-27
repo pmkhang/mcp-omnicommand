@@ -54,7 +54,7 @@ Configure in your `claude_desktop_config.json` file:
   "mcpServers": {
     "omnicommand": {
       "command": "omnicommand",
-      "args": []
+      "args": ["@mcp"]
     }
   }
 }
