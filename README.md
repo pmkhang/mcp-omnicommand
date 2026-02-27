@@ -13,6 +13,9 @@ Một máy chủ MCP (Model Context Protocol) mạnh mẽ được viết bằng
   - Hỗ trợ chạy lẻ hoặc batch (Parallel/Sequential).
 - **Quản lý quy trình Native**:
   - Liệt kê (`process_list`), dọn dẹp (`process_cleanup`) và **Tắt process (`process_kill`)** bằng code native (không phụ thuộc lệnh hệ thống).
+- **File & Directory Operations (Nâng cao)**:
+  - `list_directory`: Liệt kê cây thư mục thông minh, hỗ trợ `.gitignore`, sắp xếp theo size/date, và nhóm thư mục lên đầu.
+  - `find_file`: Tìm kiếm file cực mạnh bằng Regex, Glob Pattern (`*.rs`) hoặc nội dung text.
 - **Chế độ Hybrid CLI**: Chạy như một MCP Server hoặc như một công cụ dòng lệnh (CLI) độc lập.
 - **Bảo mật**: Tích hợp danh sách đen (blacklist) ngăn chặn các lệnh nguy hiểm (rm -rf, format, v.v.).
 
@@ -72,6 +75,8 @@ omnicommand process_kill --name "bun"
 | `process_list`    | Liệt kê các tiến trình đang chạy.     | `filter`                                                   |
 | `process_kill`    | Tắt tiến trình bằng PID hoặc tên.     | `pid`, `name`, `force`                                     |
 | `process_cleanup` | Dọn dẹp các tiến trình shell bị treo. | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
+| `list_directory`  | Liệt kê thư mục (hỗ trợ gitignore).   | `path`, `max_depth`, `dirs_first`, `pattern`               |
+| `find_file`       | Tìm file theo tên, regex, nội dung.   | `path`, `pattern`, `content`, `is_regex`                   |
 
 ## 📖 Ví dụ nâng cao
 
@@ -82,6 +87,14 @@ omnicommand process_kill --name "bun"
 - **Tắt tất cả Node process treo**:
   ```json
   { "name": "node", "force": true }
+  ```
+- **Tìm kiếm file Rust**:
+  ```bash
+  omnicommand find_file --path "C:\my_project" --pattern "*.rs"
+  ```
+- **Liệt kê file json trong src (dirs first)**:
+  ```bash
+  omnicommand list_directory --path "./src" --pattern "*.json" --dirs_first true
   ```
 
 ## ⚠️ Lưu ý bảo mật

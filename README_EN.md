@@ -13,6 +13,9 @@ A powerful MCP (Model Context Protocol) server written in Rust, allowing AI mode
   - Supports single or batch execution (Parallel/Sequential).
 - **Native Process Management**:
   - List (`process_list`), cleanup (`process_cleanup`), and **Kill process (`process_kill`)** using native code (no dependency on system commands).
+- **Advanced File & Directory Operations**:
+  - `list_directory`: Intelligent directory listing with `.gitignore` support, sorting by size/date, and directory grouping.
+  - `find_file`: Powerful file searching using Regex, Glob Patterns (`*.rs`), or text content.
 - **Hybrid CLI Mode**: Runs as an MCP Server or as a standalone Command Line Interface (CLI) tool.
 - **Security**: Integrated blacklist to prevent dangerous commands (`rm -rf`, `format`, etc.).
 
@@ -69,12 +72,14 @@ omnicommand --version
 
 ## 🛠 Available Tools
 
-| Tool              | Description                       | Key Parameters                                             |
-| :---------------- | :-------------------------------- | :--------------------------------------------------------- |
-| `run_command`     | Run one or more shell commands.   | `command`, `background`, `logFile`, `shell`, `runParallel` |
-| `process_list`    | List running processes.           | `filter`                                                   |
-| `process_kill`    | Kill a process by PID or name.    | `pid`, `name`, `force`                                     |
-| `process_cleanup` | Clean up hanging shell processes. | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
+| Tool              | Description                         | Key Parameters                                             |
+| :---------------- | :---------------------------------- | :--------------------------------------------------------- |
+| `run_command`     | Run one or more shell commands.     | `command`, `background`, `logFile`, `shell`, `runParallel` |
+| `process_list`    | List running processes.             | `filter`                                                   |
+| `process_kill`    | Kill a process by PID or name.      | `pid`, `name`, `force`                                     |
+| `process_cleanup` | Clean up hanging shell processes.   | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
+| `list_directory`  | List directory context (gitignore). | `path`, `max_depth`, `dirs_first`, `pattern`               |
+| `find_file`       | Find files by name, regex, content  | `path`, `pattern`, `content`, `is_regex`                   |
 
 ## 📖 Advanced Examples
 
@@ -85,6 +90,14 @@ omnicommand --version
 - **Kill all hanging Node processes**:
   ```json
   { "name": "node", "force": true }
+  ```
+- **Search for Rust files**:
+  ```bash
+  omnicommand find_file --path "C:\my_project" --pattern "*.rs"
+  ```
+- **List json files in src (dirs first)**:
+  ```bash
+  omnicommand list_directory --path "./src" --pattern "*.json" --dirs_first true
   ```
 
 ## ⚠️ Security Notes
