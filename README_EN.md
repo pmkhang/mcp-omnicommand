@@ -19,6 +19,8 @@ A powerful MCP (Model Context Protocol) server written in Rust, allowing AI mode
   - `tail_file`: Read the last N lines of a file (perfect for log monitoring).
 - **Sync & Wait (`wait_for`)**:
   - Wait for specific conditions: File existence, Port reachability, or Process termination.
+- **Network Communication (`fetch_api`)**:
+  - Make HTTP requests (GET, POST, etc.) directly from the command line like `curl`.
 - **Hybrid CLI Mode**: Runs as an MCP Server or as a standalone Command Line Interface (CLI) tool.
 - **Security**: Integrated blacklist to prevent dangerous commands (`rm -rf`, `format`, etc.).
 
@@ -85,6 +87,7 @@ omnicommand --version
 | `find_file`       | Find files by name, regex, content  | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
 | `tail_file`       | Read last N lines of a file.        | `path`, `lines`                                            |
 | `wait_for`        | Wait for Port, File, or Process.    | `strategy`, `target`, `timeout`, `interval`                |
+| `fetch_api`       | Make HTTP requests (curl-like).     | `url`, `method`, `headers`, `body`, `timeout`              |
 
 ## 📖 Advanced Examples
 
@@ -107,6 +110,10 @@ omnicommand --version
 - **Wait for server before proceeding**:
   ```bash
   omnicommand wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
+  ```
+- **Make an HTTP request**:
+  ```bash
+  omnicommand fetch_api --url "https://jsonplaceholder.typicode.com/posts/1"
   ```
 - **Search for Rust files**:
   ```bash

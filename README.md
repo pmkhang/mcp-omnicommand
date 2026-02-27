@@ -19,6 +19,8 @@ Một máy chủ MCP (Model Context Protocol) mạnh mẽ được viết bằng
   - `tail_file`: Đọc N dòng cuối của file (cực kỳ hữu ích để theo dõi log).
 - **Đồng bộ & Chờ đợi (`wait_for`)**:
   - Chờ đợi một điều kiện cụ thể: File xuất hiện, Port mở, hoặc Process kết thúc.
+- **Giao tiếp mạng (`fetch_api`)**:
+  - Thực hiện các HTTP request (GET, POST, v.v.) trực tiếp từ dòng lệnh tương tự như `curl`.
 - **Chế độ Hybrid CLI**: Chạy như một MCP Server hoặc như một công cụ dòng lệnh (CLI) độc lập.
 - **Bảo mật**: Tích hợp danh sách đen (blacklist) ngăn chặn các lệnh nguy hiểm (rm -rf, format, v.v.).
 
@@ -82,6 +84,7 @@ omnicommand process_kill --name "bun"
 | `find_file`       | Tìm file theo tên, regex, nội dung.    | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
 | `tail_file`       | Đọc N dòng cuối của file.              | `path`, `lines`                                            |
 | `wait_for`        | Đợi Port, File, hoặc Process kết thúc. | `strategy`, `target`, `timeout`, `interval`                |
+| `fetch_api`       | Thực hiện HTTP request (curl-like).    | `url`, `method`, `headers`, `body`, `timeout`              |
 
 ## 📖 Ví dụ nâng cao
 
@@ -104,6 +107,10 @@ omnicommand process_kill --name "bun"
 - **Chờ server sẵn sàng rổi mới chạy tiếp**:
   ```bash
   omnicommand wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
+  ```
+- **Gọi HTTP API**:
+  ```bash
+  omnicommand fetch_api --url "https://jsonplaceholder.typicode.com/posts/1"
   ```
 - **Tìm kiếm file Rust**:
   ```bash
