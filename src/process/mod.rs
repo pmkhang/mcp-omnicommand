@@ -1,8 +1,10 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::Duration;
+use tokio::process::{Child, Command as TokioCommand};
 use tokio::time::timeout;
 
 #[cfg(windows)]
@@ -19,7 +21,7 @@ pub struct CommandResponse {
 }
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn is_safe_command(cmd: &str) -> bool {
     let lower_cmd = cmd.to_lowercase();
@@ -38,7 +40,7 @@ pub fn is_safe_command(cmd: &str) -> bool {
         "remove-item -recurse -force",
     ];
 
-    for blocked in blacklist.iter() {
+    for blocked in &blacklist {
         if lower_cmd.contains(blocked) {
             return false;
         }
@@ -49,7 +51,7 @@ pub fn is_safe_command(cmd: &str) -> bool {
 /// Thực hiện Force Kill theo Tree tiến trình
 #[cfg(windows)]
 pub fn force_kill_tree(pid: u32) {
-    let mut kill_cmd = std::process::Command::new("taskkill");
+    let mut kill_cmd = Command::new("taskkill");
     kill_cmd
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .creation_flags(CREATE_NO_WINDOW)
@@ -61,10 +63,7 @@ pub fn force_kill_tree(pid: u32) {
 
 #[cfg(not(windows))]
 pub fn force_kill_tree(pid: u32) {
-    // Trên Unix, pkill -P <pid> giết các con,
-    // nhưng tốt nhất là kill PID chính trước rồi mới kill lũ con hoặc dùng group.
-    // Đơn giản nhất là kill PID chính.
-    let mut kill_cmd = std::process::Command::new("kill");
+    let mut kill_cmd = Command::new("kill");
     kill_cmd
         .args(["-9", &pid.to_string()])
         .stdout(Stdio::null())
@@ -82,6 +81,151 @@ fn truncate_to_bytes(s: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     s[..end].to_string()
+}
+
+fn setup_stdio(cmd: &mut TokioCommand, log_file: Option<&str>) -> Result<Option<String>, String> {
+    if let Some(log_path) = log_file {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .map_err(|e| format!("Failed to open log file: {e}"))?;
+        let err_file = file
+            .try_clone()
+            .map_err(|e| format!("Failed to clone log file: {e}"))?;
+        cmd.stdout(Stdio::from(file));
+        cmd.stderr(Stdio::from(err_file));
+        Ok(Some(log_path.to_string()))
+    } else {
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        Ok(None)
+    }
+}
+
+async fn handle_foreground_process(
+    mut child: Child,
+    timeout_ms: u64,
+    pid: u32,
+    log_path_opt: Option<String>,
+) -> Result<CommandResponse, String> {
+    if log_path_opt.is_some() {
+        let status = timeout(Duration::from_millis(timeout_ms), child.wait()).await;
+        match status {
+            Ok(Ok(s)) => Ok(CommandResponse {
+                stdout: "Output redirected to file".to_string(),
+                stderr: String::new(),
+                exit_code: s.code().unwrap_or(1),
+                timeout: false,
+                error: None,
+            }),
+            Ok(Err(e)) => Ok(CommandResponse {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 1,
+                timeout: false,
+                error: Some(format!("Wait failed: {e}")),
+            }),
+            Err(_) => {
+                if pid > 0 {
+                    force_kill_tree(pid);
+                }
+                Ok(CommandResponse {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 1,
+                    timeout: true,
+                    error: Some(format!("Killed after {timeout_ms}ms timeout")),
+                })
+            }
+        }
+    } else {
+        let result = timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await;
+        match result {
+            Ok(Ok(output)) => {
+                let stdout_str = String::from_utf8_lossy(&output.stdout);
+                let stderr_str = String::from_utf8_lossy(&output.stderr);
+                let max_output_bytes = 10 * 1024 * 1024;
+
+                Ok(CommandResponse {
+                    stdout: truncate_to_bytes(&stdout_str, max_output_bytes),
+                    stderr: truncate_to_bytes(&stderr_str, max_output_bytes),
+                    exit_code: output.status.code().unwrap_or(1),
+                    timeout: false,
+                    error: None,
+                })
+            }
+            Ok(Err(e)) => Ok(CommandResponse {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 1,
+                timeout: false,
+                error: Some(format!("Wait failed: {e}")),
+            }),
+            Err(_) => {
+                if pid > 0 {
+                    force_kill_tree(pid);
+                }
+                Ok(CommandResponse {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 1,
+                    timeout: true,
+                    error: Some(format!("Killed after {timeout_ms}ms timeout")),
+                })
+            }
+        }
+    }
+}
+
+async fn monitor_process(
+    mut child: Child,
+    timeout_ms: u64,
+    background: bool,
+    wait_ms: u64,
+    log_path_opt: Option<String>,
+) -> Result<CommandResponse, String> {
+    let pid = child.id().unwrap_or(0);
+    drop(child.stdin.take());
+
+    if background {
+        match timeout(Duration::from_millis(wait_ms), child.wait()).await {
+            Ok(Ok(status)) => {
+                return Ok(CommandResponse {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: status.code().unwrap_or(1),
+                    timeout: false,
+                    error: Some("Process exited prematurely".to_string()),
+                });
+            }
+            Ok(Err(e)) => {
+                return Ok(CommandResponse {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 1,
+                    timeout: false,
+                    error: Some(format!("Wait failed: {e}")),
+                });
+            }
+            Err(_) => {
+                let msg = if let Some(path) = log_path_opt {
+                    format!("Process started in background. PID: {pid}. Logs: {path}")
+                } else {
+                    format!("Process started in background. PID: {pid}")
+                };
+                return Ok(CommandResponse {
+                    stdout: msg,
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timeout: false,
+                    error: None,
+                });
+            }
+        }
+    }
+
+    handle_foreground_process(child, timeout_ms, pid, log_path_opt).await
 }
 
 /// Thực thi một lệnh với shell tùy chọn và anti-hang protections
@@ -104,22 +248,19 @@ pub async fn exec_cmd(
         });
     }
 
-    if let Some(cwd) = cwd_opt
-        && !Path::new(cwd).is_dir() {
-            return Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Invalid working directory: {}", cwd)),
-            });
-        }
+    if let Some(cwd) = cwd_opt.filter(|c| !Path::new(c).is_dir()) {
+        return Ok(CommandResponse {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 1,
+            timeout: false,
+            error: Some(format!("Invalid working directory: {cwd}")),
+        });
+    }
 
-    let max_output_bytes = 10 * 1024 * 1024; // 10MB limit
-
-    let mut _cmd = if cfg!(windows) {
+    let mut cmd = if cfg!(windows) {
         let shell = shell_opt.unwrap_or("cmd.exe");
-        let mut c = tokio::process::Command::new(shell);
+        let mut c = TokioCommand::new(shell);
         if shell.ends_with("cmd.exe") || shell == "cmd" {
             c.args(["/c", command_str]);
         } else {
@@ -130,34 +271,19 @@ pub async fn exec_cmd(
         c
     } else {
         let shell = shell_opt.unwrap_or("sh");
-        let mut c = tokio::process::Command::new(shell);
+        let mut c = TokioCommand::new(shell);
         c.args(["-c", command_str]);
         c
     };
 
-    if let Some(log_path) = log_file {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .map_err(|e| format!("Failed to open log file: {}", e))?;
-        let err_file = file
-            .try_clone()
-            .map_err(|e| format!("Failed to clone log file: {}", e))?;
-        _cmd.stdout(Stdio::from(file));
-        _cmd.stderr(Stdio::from(err_file));
-    } else {
-        _cmd.stdout(Stdio::piped());
-        _cmd.stderr(Stdio::piped());
-    }
-
-    _cmd.stdin(Stdio::piped());
+    let log_path_opt = setup_stdio(&mut cmd, log_file)?;
+    cmd.stdin(Stdio::piped());
 
     if let Some(cwd) = cwd_opt {
-        _cmd.current_dir(cwd);
+        cmd.current_dir(cwd);
     }
 
-    let mut child = match _cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             return Ok(CommandResponse {
@@ -165,130 +291,15 @@ pub async fn exec_cmd(
                 stderr: String::new(),
                 exit_code: 1,
                 timeout: false,
-                error: Some(format!("Spawn failed: {}", e)),
+                error: Some(format!("Spawn failed: {e}")),
             });
         }
     };
 
-    let pid = child.id().unwrap_or(0);
-    drop(child.stdin.take());
-
-    // Nếu chạy ngầm, chúng ta có thể muốn đợi một lát để xem nó có chết ngay không.
-    // Nếu không, trả về PID.
-    if background {
-        // Đợi trong thời gian ngắn
-        match timeout(Duration::from_millis(wait_ms), child.wait()).await {
-            Ok(Ok(status)) => {
-                // Nó chết sớm
-                return Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: status.code().unwrap_or(1),
-                    timeout: false,
-                    error: Some("Process exited prematurely".to_string()),
-                });
-            }
-            Ok(Err(e)) => {
-                return Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: false,
-                    error: Some(format!("Wait failed: {}", e)),
-                });
-            }
-            Err(_) => {
-                // Nó vẫn đang chạy! Thành công cho chế độ background
-                let msg = if let Some(path) = log_file {
-                    format!(
-                        "Process started in background. PID: {}. Logs: {}",
-                        pid, path
-                    )
-                } else {
-                    format!("Process started in background. PID: {}", pid)
-                };
-                return Ok(CommandResponse {
-                    stdout: msg,
-                    stderr: String::new(),
-                    exit_code: 0,
-                    timeout: false,
-                    error: None,
-                });
-            }
-        }
-    }
-
-    // Đợi process chạy cho đến khi kết thúc (Behavior cũ)
-    if log_file.is_some() {
-        let status = timeout(Duration::from_millis(timeout_ms), child.wait()).await;
-        match status {
-            Ok(Ok(s)) => Ok(CommandResponse {
-                stdout: "Output redirected to file".to_string(),
-                stderr: String::new(),
-                exit_code: s.code().unwrap_or(1),
-                timeout: false,
-                error: None,
-            }),
-            Ok(Err(e)) => Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Wait failed: {}", e)),
-            }),
-            Err(_) => {
-                if pid > 0 {
-                    force_kill_tree(pid);
-                }
-                Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: true,
-                    error: Some(format!("Killed after {}ms timeout", timeout_ms)),
-                })
-            }
-        }
-    } else {
-        let result = timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await;
-        match result {
-            Ok(Ok(output)) => {
-                let stdout_str = String::from_utf8_lossy(&output.stdout);
-                let stderr_str = String::from_utf8_lossy(&output.stderr);
-
-                Ok(CommandResponse {
-                    stdout: truncate_to_bytes(&stdout_str, max_output_bytes),
-                    stderr: truncate_to_bytes(&stderr_str, max_output_bytes),
-                    exit_code: output.status.code().unwrap_or(1),
-                    timeout: false,
-                    error: None,
-                })
-            }
-            Ok(Err(e)) => Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Wait failed: {}", e)),
-            }),
-            Err(_) => {
-                // Hết hạn thời gian (Timeout), Kill tree!
-                if pid > 0 {
-                    force_kill_tree(pid);
-                }
-                Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: true,
-                    error: Some(format!("Killed after {}ms timeout", timeout_ms)),
-                })
-            }
-        }
-    }
+    monitor_process(child, timeout_ms, background, wait_ms, log_path_opt).await
 }
 
-/// Chạy PowerShell an toàn với Base64 Encoded Command
+/// Chạy `PowerShell` an toàn với Base64 Encoded Command
 pub async fn exec_powershell(
     command_str: &str,
     cwd_opt: Option<&str>,
@@ -307,31 +318,26 @@ pub async fn exec_powershell(
         });
     }
 
-    if let Some(cwd) = cwd_opt
-        && !Path::new(cwd).is_dir() {
-            return Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Invalid working directory: {}", cwd)),
-            });
-        }
+    if let Some(cwd) = cwd_opt.filter(|c| !Path::new(c).is_dir()) {
+        return Ok(CommandResponse {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 1,
+            timeout: false,
+            error: Some(format!("Invalid working directory: {cwd}")),
+        });
+    }
 
-    let max_output_bytes = 5 * 1024 * 1024;
+    let utf16_bytes: Vec<u16> = command_str.encode_utf16().collect();
+    let mut u8_bytes = Vec::with_capacity(utf16_bytes.len() * 2);
+    for b in utf16_bytes {
+        u8_bytes.push((b & 0xFF) as u8);
+        u8_bytes.push((b >> 8) as u8);
+    }
+    let encoded = STANDARD.encode(&u8_bytes);
 
-    #[cfg(windows)]
-    let mut _cmd = {
-        let utf16_bytes: Vec<u16> = command_str.encode_utf16().collect();
-        let mut u8_bytes = Vec::with_capacity(utf16_bytes.len() * 2);
-        for b in utf16_bytes {
-            u8_bytes.push((b & 0xFF) as u8);
-            u8_bytes.push((b >> 8) as u8);
-        }
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        let encoded = STANDARD.encode(&u8_bytes);
-
-        let mut c = tokio::process::Command::new("powershell.exe");
+    let mut cmd = if cfg!(windows) {
+        let mut c = TokioCommand::new("powershell.exe");
         c.args([
             "-NonInteractive",
             "-NoProfile",
@@ -342,47 +348,20 @@ pub async fn exec_powershell(
         ]);
         c.creation_flags(CREATE_NO_WINDOW);
         c
-    };
-
-    #[cfg(not(windows))]
-    let mut _cmd = {
-        let utf16_bytes: Vec<u16> = command_str.encode_utf16().collect();
-        let mut u8_bytes = Vec::with_capacity(utf16_bytes.len() * 2);
-        for b in utf16_bytes {
-            u8_bytes.push((b & 0xFF) as u8);
-            u8_bytes.push((b >> 8) as u8);
-        }
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        let encoded = STANDARD.encode(&u8_bytes);
-
-        let mut c = tokio::process::Command::new("pwsh");
+    } else {
+        let mut c = TokioCommand::new("pwsh");
         c.args(["-NonInteractive", "-NoProfile", "-EncodedCommand", &encoded]);
         c
     };
 
-    if let Some(log_path) = log_file {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .map_err(|e| format!("Failed to open log file: {}", e))?;
-        let err_file = file
-            .try_clone()
-            .map_err(|e| format!("Failed to clone log file: {}", e))?;
-        _cmd.stdout(Stdio::from(file));
-        _cmd.stderr(Stdio::from(err_file));
-    } else {
-        _cmd.stdout(Stdio::piped());
-        _cmd.stderr(Stdio::piped());
-    }
-
-    _cmd.stdin(Stdio::piped());
+    let log_path_opt = setup_stdio(&mut cmd, log_file)?;
+    cmd.stdin(Stdio::piped());
 
     if let Some(cwd) = cwd_opt {
-        _cmd.current_dir(cwd);
+        cmd.current_dir(cwd);
     }
 
-    let mut child = match _cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             return Ok(CommandResponse {
@@ -390,118 +369,10 @@ pub async fn exec_powershell(
                 stderr: String::new(),
                 exit_code: 1,
                 timeout: false,
-                error: Some(format!("Spawn failed: {}", e)),
+                error: Some(format!("Spawn failed: {e}")),
             });
         }
     };
 
-    let pid = child.id().unwrap_or(0);
-    drop(child.stdin.take());
-
-    if background {
-        match timeout(Duration::from_millis(wait_ms), child.wait()).await {
-            Ok(Ok(status)) => {
-                return Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: status.code().unwrap_or(1),
-                    timeout: false,
-                    error: Some("Process exited prematurely".to_string()),
-                });
-            }
-            Ok(Err(e)) => {
-                return Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: false,
-                    error: Some(format!("Wait failed: {}", e)),
-                });
-            }
-            Err(_) => {
-                let msg = if let Some(path) = log_file {
-                    format!(
-                        "PowerShell process started in background. PID: {}. Logs: {}",
-                        pid, path
-                    )
-                } else {
-                    format!("PowerShell process started in background. PID: {}", pid)
-                };
-                return Ok(CommandResponse {
-                    stdout: msg,
-                    stderr: String::new(),
-                    exit_code: 0,
-                    timeout: false,
-                    error: None,
-                });
-            }
-        }
-    }
-
-    if log_file.is_some() {
-        let status = timeout(Duration::from_millis(timeout_ms), child.wait()).await;
-        match status {
-            Ok(Ok(s)) => Ok(CommandResponse {
-                stdout: "Output redirected to file".to_string(),
-                stderr: String::new(),
-                exit_code: s.code().unwrap_or(1),
-                timeout: false,
-                error: None,
-            }),
-            Ok(Err(e)) => Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Wait failed: {}", e)),
-            }),
-            Err(_) => {
-                if pid > 0 {
-                    force_kill_tree(pid);
-                }
-                Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: true,
-                    error: Some(format!("Killed after {}ms timeout", timeout_ms)),
-                })
-            }
-        }
-    } else {
-        let result = timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await;
-        match result {
-            Ok(Ok(output)) => {
-                let stdout_str = String::from_utf8_lossy(&output.stdout);
-                let stderr_str = String::from_utf8_lossy(&output.stderr);
-
-                Ok(CommandResponse {
-                    stdout: truncate_to_bytes(&stdout_str, max_output_bytes),
-                    stderr: truncate_to_bytes(&stderr_str, max_output_bytes),
-                    exit_code: output.status.code().unwrap_or(1),
-                    timeout: false,
-                    error: None,
-                })
-            }
-            Ok(Err(e)) => Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Wait failed: {}", e)),
-            }),
-            Err(_) => {
-                if pid > 0 {
-                    force_kill_tree(pid);
-                }
-                Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: true,
-                    error: Some(format!("Killed after {}ms timeout", timeout_ms)),
-                })
-            }
-        }
-    }
+    monitor_process(child, timeout_ms, background, wait_ms, log_path_opt).await
 }

@@ -1,4 +1,5 @@
-use crate::process::{exec_cmd, exec_powershell};
+use crate::process::{CommandResponse, exec_cmd, exec_powershell};
+use futures::future;
 use serde_json::{Value, json};
 
 pub fn info() -> Value {
@@ -46,7 +47,7 @@ async fn execute_with_shell_choice(
     background: bool,
     wait_ms: u64,
     log_file: Option<&str>,
-) -> Result<crate::process::CommandResponse, String> {
+) -> Result<CommandResponse, String> {
     let shell = shell_opt.unwrap_or("");
     if shell == "powershell" || shell == "pwsh" || (cfg!(windows) && shell == "ps") {
         exec_powershell(
@@ -75,34 +76,31 @@ async fn execute_with_shell_choice(
 pub async fn run(arguments: &Value, default_cwd: Option<&str>) -> Result<Value, String> {
     let timeout = arguments
         .get("timeout")
-        .and_then(|v| v.as_u64())
+        .and_then(Value::as_u64)
         .unwrap_or(30000);
     let run_parallel = arguments
         .get("runParallel")
-        .and_then(|v| v.as_bool())
+        .and_then(Value::as_bool)
         .unwrap_or(false);
     let continue_on_error = arguments
         .get("continueOnError")
-        .and_then(|v| v.as_bool())
+        .and_then(Value::as_bool)
         .unwrap_or(false);
-    let global_shell = arguments.get("shell").and_then(|v| v.as_str());
-    let global_cwd = arguments
-        .get("cwd")
-        .and_then(|v| v.as_str())
-        .or(default_cwd);
+    let global_shell = arguments.get("shell").and_then(Value::as_str);
+    let global_cwd = arguments.get("cwd").and_then(Value::as_str).or(default_cwd);
     let background = arguments
         .get("background")
-        .and_then(|v| v.as_bool())
+        .and_then(Value::as_bool)
         .unwrap_or(false);
     let wait_ms = arguments
         .get("waitForOutput")
-        .and_then(|v| v.as_u64())
+        .and_then(Value::as_u64)
         .unwrap_or(1000);
-    let log_file = arguments.get("logFile").and_then(|v| v.as_str());
+    let log_file = arguments.get("logFile").and_then(Value::as_str);
 
     // Case 1: Single command
-    if let Some(cmd_str) = arguments.get("command").and_then(|v| v.as_str()) {
-        let res = execute_with_shell_choice(
+    if let Some(cmd_str) = arguments.get("command").and_then(Value::as_str) {
+        return run_single_command(
             cmd_str,
             global_cwd,
             timeout,
@@ -111,85 +109,123 @@ pub async fn run(arguments: &Value, default_cwd: Option<&str>) -> Result<Value, 
             wait_ms,
             log_file,
         )
-        .await?;
-        return Ok(
-            json!([{ "type": "text", "text": serde_json::to_string(&res).unwrap_or_default() }]),
-        );
+        .await;
     }
 
     // Case 2: Batch commands
-    if let Some(cmds) = arguments.get("commands").and_then(|v| v.as_array()) {
-        if run_parallel {
-            let mut futures_list = Vec::new();
-            for item in cmds {
-                let cmd = item
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let cwd = item
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .or(global_cwd)
-                    .map(String::from);
-                let shell = item
-                    .get("shell")
-                    .and_then(|v| v.as_str())
-                    .or(global_shell)
-                    .map(String::from);
-                let bg = background;
-                let w = wait_ms;
-                let lf = log_file.map(String::from);
-
-                futures_list.push(async move {
-                    let res = execute_with_shell_choice(
-                        &cmd,
-                        cwd.as_deref(),
-                        timeout,
-                        shell.as_deref(),
-                        bg,
-                        w,
-                        lf.as_deref(),
-                    )
-                    .await;
-                    json!({
-                        "command": cmd,
-                        "result": match res { Ok(r) => json!(r), Err(e) => json!({"error": e}) }
-                    })
-                });
-            }
-            let results = futures::future::join_all(futures_list).await;
-            return Ok(
-                json!([{ "type": "text", "text": serde_json::to_string(&results).unwrap_or_default() }]),
-            );
-        } else {
-            let mut results = Vec::new();
-            for item in cmds {
-                let cmd = item.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                let cwd = item.get("cwd").and_then(|v| v.as_str()).or(global_cwd);
-                let shell = item.get("shell").and_then(|v| v.as_str()).or(global_shell);
-
-                let res = execute_with_shell_choice(
-                    cmd, cwd, timeout, shell, background, wait_ms, log_file,
-                )
-                .await?;
-                let success = res.exit_code == 0;
-
-                results.push(json!({
-                    "command": cmd,
-                    "result": json!(res)
-                }));
-
-                if !success && !continue_on_error {
-                    results.push(json!({"status": "Stopped due to command failure"}));
-                    break;
-                }
-            }
-            return Ok(
-                json!([{ "type": "text", "text": serde_json::to_string(&results).unwrap_or_default() }]),
-            );
-        }
+    if let Some(cmds) = arguments.get("commands").and_then(Value::as_array) {
+        return run_batch_commands(
+            cmds,
+            global_cwd,
+            timeout,
+            global_shell,
+            background,
+            wait_ms,
+            log_file,
+            run_parallel,
+            continue_on_error,
+        )
+        .await;
     }
 
     Err("Either 'command' or 'commands' must be provided".to_string())
+}
+
+async fn run_single_command(
+    cmd_str: &str,
+    global_cwd: Option<&str>,
+    timeout: u64,
+    global_shell: Option<&str>,
+    background: bool,
+    wait_ms: u64,
+    log_file: Option<&str>,
+) -> Result<Value, String> {
+    let res = execute_with_shell_choice(
+        cmd_str,
+        global_cwd,
+        timeout,
+        global_shell,
+        background,
+        wait_ms,
+        log_file,
+    )
+    .await?;
+    Ok(json!([{ "type": "text", "text": serde_json::to_string(&res).unwrap_or_default() }]))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_batch_commands(
+    cmds: &[Value],
+    global_cwd: Option<&str>,
+    timeout: u64,
+    global_shell: Option<&str>,
+    background: bool,
+    wait_ms: u64,
+    log_file: Option<&str>,
+    run_parallel: bool,
+    continue_on_error: bool,
+) -> Result<Value, String> {
+    if run_parallel {
+        let mut futures_list = Vec::new();
+        for item in cmds {
+            let cmd = item
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let cwd = item
+                .get("cwd")
+                .and_then(Value::as_str)
+                .or(global_cwd)
+                .map(String::from);
+            let shell = item
+                .get("shell")
+                .and_then(Value::as_str)
+                .or(global_shell)
+                .map(String::from);
+            let bg = background;
+            let w = wait_ms;
+            let lf = log_file.map(String::from);
+
+            futures_list.push(async move {
+                let res = execute_with_shell_choice(
+                    &cmd,
+                    cwd.as_deref(),
+                    timeout,
+                    shell.as_deref(),
+                    bg,
+                    w,
+                    lf.as_deref(),
+                )
+                .await;
+                json!({
+                    "command": cmd,
+                    "result": match res { Ok(r) => json!(r), Err(e) => json!({"error": e}) }
+                })
+            });
+        }
+        let results = future::join_all(futures_list).await;
+        return Ok(
+            json!([{ "type": "text", "text": serde_json::to_string(&results).unwrap_or_default() }]),
+        );
+    }
+
+    let mut results = Vec::new();
+    for item in cmds {
+        let cmd = item.get("command").and_then(Value::as_str).unwrap_or("");
+        let cwd = item.get("cwd").and_then(Value::as_str).or(global_cwd);
+        let shell = item.get("shell").and_then(Value::as_str).or(global_shell);
+
+        let res =
+            execute_with_shell_choice(cmd, cwd, timeout, shell, background, wait_ms, log_file)
+                .await?;
+        let success = res.exit_code == 0;
+
+        results.push(json!({ "command": cmd, "result": json!(res) }));
+        if !success && !continue_on_error {
+            results.push(json!({"status": "Stopped due to command failure"}));
+            break;
+        }
+    }
+    Ok(json!([{ "type": "text", "text": serde_json::to_string(&results).unwrap_or_default() }]))
 }

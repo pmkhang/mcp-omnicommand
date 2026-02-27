@@ -14,10 +14,10 @@ pub fn info() -> Value {
     })
 }
 
-pub async fn run(arguments: &Value) -> Result<Value, String> {
+pub fn run(arguments: &Value) -> Result<Value, String> {
     let filter = arguments
         .get("filter")
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .unwrap_or("")
         .to_lowercase();
 
@@ -60,5 +60,6 @@ pub async fn run(arguments: &Value) -> Result<Value, String> {
         }
     }
 
-    Ok(json!([{ "type": "text", "text": serde_json::to_string(&processes).unwrap_or_default() }]))
+    let json_text = serde_json::to_string(&processes).map_err(|e| e.to_string())?;
+    Ok(json!([{ "type": "text", "text": json_text }]))
 }
