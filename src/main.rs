@@ -39,6 +39,25 @@ async fn run_standalone_cli(args: &[String]) {
         return;
     }
 
+    // Xử lý cờ help
+    if tool_name == "--help" || tool_name == "-h" {
+        println!("Omnicommand CLI");
+        println!("Usage: mcp_cmd <tool_name> [--key value] [--key=value]\n");
+        println!("Available tools:");
+        if let Some(tools_arr) = tools::get_tools().as_array() {
+            for tool in tools_arr {
+                if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                    let desc = tool
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    println!("  {name:<25} {desc}");
+                }
+            }
+        }
+        return;
+    }
+
     let mut arguments = json!({});
 
     // Phân giải các đối số dạng --key value
