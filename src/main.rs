@@ -12,8 +12,8 @@ const SERVER_VERSION: &str = "1.1.0";
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    // Nếu có đối số dòng lệnh, chạy ở chế độ CLI trực tiếp
-    if args.len() >= 2 {
+    // Chạy ở chế độ CLI trực tiếp nếu có đối số và đối số đầu tiên không phải là "@mcp"
+    if args.len() >= 2 && args[1] != "@mcp" {
         run_standalone_cli(&args).await;
         return;
     }
@@ -42,7 +42,7 @@ async fn run_standalone_cli(args: &[String]) {
     // Xử lý cờ help
     if tool_name == "--help" || tool_name == "-h" {
         println!("Omnicommand CLI");
-        println!("Usage: mcp_cmd <tool_name> [--key value] [--key=value]\n");
+        println!("Usage: omnicommand <tool_name> [--key value] [--key=value]\n");
         println!("Available tools:");
         if let Some(tools_arr) = tools::get_tools().as_array() {
             for tool in tools_arr {

@@ -54,7 +54,7 @@ Cấu hình trong file `claude_desktop_config.json`:
   "mcpServers": {
     "omnicommand": {
       "command": "omnicommand",
-      "args": []
+      "args": ["@mcp"]
     }
   }
 }
