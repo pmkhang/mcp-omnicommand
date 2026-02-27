@@ -28,6 +28,9 @@ serde_json = "1.0.149"
 sysinfo = "0.38.2"
 tokio = { version = "1.49.0", features = ["full"] }
 reqwest = { version = "0.13.2", features = ["json"] }
+regex = "1.11.1"
+ignore = "0.4.23"
+glob = "0.3.1"
 
 
 [profile.dev]
