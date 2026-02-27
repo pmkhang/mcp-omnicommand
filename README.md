@@ -16,6 +16,9 @@ Một máy chủ MCP (Model Context Protocol) mạnh mẽ được viết bằng
 - **File & Directory Operations (Nâng cao)**:
   - `list_directory`: Liệt kê cây thư mục thông minh, hỗ trợ `.gitignore`, sắp xếp theo size/date, và nhóm thư mục lên đầu.
   - `find_file`: Tìm kiếm file cực mạnh bằng Regex, Glob Pattern (`*.rs`) hoặc nội dung text.
+  - `tail_file`: Đọc N dòng cuối của file (cực kỳ hữu ích để theo dõi log).
+- **Đồng bộ & Chờ đợi (`wait_for`)**:
+  - Chờ đợi một điều kiện cụ thể: File xuất hiện, Port mở, hoặc Process kết thúc.
 - **Chế độ Hybrid CLI**: Chạy như một MCP Server hoặc như một công cụ dòng lệnh (CLI) độc lập.
 - **Bảo mật**: Tích hợp danh sách đen (blacklist) ngăn chặn các lệnh nguy hiểm (rm -rf, format, v.v.).
 
@@ -69,14 +72,16 @@ omnicommand process_kill --name "bun"
 
 ## 🛠 Các công cụ (Tools) sẵn có
 
-| Tool              | Mô tả                                 | Tham số chính                                              |
-| :---------------- | :------------------------------------ | :--------------------------------------------------------- |
-| `run_command`     | Chạy một hoặc nhiều lệnh shell.       | `command`, `background`, `logFile`, `shell`, `runParallel` |
-| `process_list`    | Liệt kê các tiến trình đang chạy.     | `filter`                                                   |
-| `process_kill`    | Tắt tiến trình bằng PID hoặc tên.     | `pid`, `name`, `force`                                     |
-| `process_cleanup` | Dọn dẹp các tiến trình shell bị treo. | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
-| `list_directory`  | Liệt kê thư mục (hỗ trợ gitignore).   | `path`, `max_depth`, `dirs_first`, `pattern`               |
-| `find_file`       | Tìm file theo tên, regex, nội dung.   | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
+| Tool              | Mô tả                                  | Tham số chính                                              |
+| :---------------- | :------------------------------------- | :--------------------------------------------------------- |
+| `run_command`     | Chạy một hoặc nhiều lệnh shell.        | `command`, `background`, `logFile`, `shell`, `runParallel` |
+| `process_list`    | Liệt kê các tiến trình đang chạy.      | `filter`                                                   |
+| `process_kill`    | Tắt tiến trình bằng PID hoặc tên.      | `pid`, `name`, `force`                                     |
+| `process_cleanup` | Dọn dẹp các tiến trình shell bị treo.  | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
+| `list_directory`  | Liệt kê thư mục (hỗ trợ gitignore).    | `path`, `max_depth`, `dirs_first`, `pattern`               |
+| `find_file`       | Tìm file theo tên, regex, nội dung.    | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
+| `tail_file`       | Đọc N dòng cuối của file.              | `path`, `lines`                                            |
+| `wait_for`        | Đợi Port, File, hoặc Process kết thúc. | `strategy`, `target`, `timeout`, `interval`                |
 
 ## 📖 Ví dụ nâng cao
 
@@ -91,6 +96,14 @@ omnicommand process_kill --name "bun"
 - **Tìm tất cả dòng có chữ 'FIXME' (dạng phẳng)**:
   ```bash
   omnicommand find_file --path "./src" --content "FIXME" --match_per_line true
+  ```
+- **Theo dõi log real-time**:
+  ```bash
+  omnicommand tail_file --path "dev_server.log" --lines 20
+  ```
+- **Chờ server sẵn sàng rổi mới chạy tiếp**:
+  ```bash
+  omnicommand wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
   ```
 - **Tìm kiếm file Rust**:
   ```bash

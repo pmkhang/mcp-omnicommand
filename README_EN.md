@@ -16,6 +16,9 @@ A powerful MCP (Model Context Protocol) server written in Rust, allowing AI mode
 - **Advanced File & Directory Operations**:
   - `list_directory`: Intelligent directory listing with `.gitignore` support, sorting by size/date, and directory grouping.
   - `find_file`: Powerful file searching using Regex, Glob Patterns (`*.rs`), or text content.
+  - `tail_file`: Read the last N lines of a file (perfect for log monitoring).
+- **Sync & Wait (`wait_for`)**:
+  - Wait for specific conditions: File existence, Port reachability, or Process termination.
 - **Hybrid CLI Mode**: Runs as an MCP Server or as a standalone Command Line Interface (CLI) tool.
 - **Security**: Integrated blacklist to prevent dangerous commands (`rm -rf`, `format`, etc.).
 
@@ -80,6 +83,8 @@ omnicommand --version
 | `process_cleanup` | Clean up hanging shell processes.   | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
 | `list_directory`  | List directory context (gitignore). | `path`, `max_depth`, `dirs_first`, `pattern`               |
 | `find_file`       | Find files by name, regex, content  | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
+| `tail_file`       | Read last N lines of a file.        | `path`, `lines`                                            |
+| `wait_for`        | Wait for Port, File, or Process.    | `strategy`, `target`, `timeout`, `interval`                |
 
 ## 📖 Advanced Examples
 
@@ -94,6 +99,14 @@ omnicommand --version
 - **Find all lines with 'FIXME' (flat mode)**:
   ```bash
   omnicommand find_file --path "./src" --content "FIXME" --match_per_line true
+  ```
+- **Real-time log monitoring**:
+  ```bash
+  omnicommand tail_file --path "dev_server.log" --lines 20
+  ```
+- **Wait for server before proceeding**:
+  ```bash
+  omnicommand wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
   ```
 - **Search for Rust files**:
   ```bash
