@@ -19,6 +19,7 @@ pub fn info() -> Value {
                 "content": { "type": "string", "description": "Text content to search for inside files" },
                 "is_regex": { "type": "boolean", "description": "Use regex for content search", "default": false },
                 "case_sensitive": { "type": "boolean", "description": "Case sensitive matching (both name and content)", "default": false },
+                "match_per_line": { "type": "boolean", "description": "If true, returns each line that matches the content query as a separate result.", "default": false },
                 "extension": { "type": "string", "description": "Filter by file extension (e.g., 'rs')" },
                 "min_size": { "type": "number", "description": "Minimum file size in bytes" },
                 "max_size": { "type": "number", "description": "Maximum file size in bytes" },
@@ -31,9 +32,9 @@ pub fn info() -> Value {
 }
 
 #[derive(serde::Serialize)]
-struct ContentMatch {
-    line: usize,
-    text: String,
+pub struct ContentMatch {
+    pub line_number: usize,
+    pub line_content: String,
 }
 
 #[derive(serde::Serialize)]
@@ -44,12 +45,20 @@ struct FileResult {
     matches: Vec<ContentMatch>,
 }
 
+#[derive(serde::Serialize)]
+struct FlatMatch {
+    path: String,
+    line_number: usize,
+    line_content: String,
+}
+
 struct SearchOptions<'a> {
     pattern: Option<&'a str>,
     name_regex: Option<Regex>,
     name_glob: Option<Pattern>,
     content: Option<&'a str>,
     content_regex: Option<Regex>,
+    match_per_line: bool,
     extension: Option<&'a str>,
     min_size: Option<u64>,
     max_size: Option<u64>,
@@ -87,8 +96,8 @@ fn search_file_content(
 
         if is_match {
             file_matches.push(ContentMatch {
-                line: index + 1,
-                text: line_text.trim().to_string(),
+                line_number: index + 1,
+                line_content: line_text.trim().to_string(),
             });
         }
     }
@@ -185,6 +194,10 @@ fn parse_options(arguments: &Value) -> Result<SearchOptions<'_>, String> {
         name_glob,
         content,
         content_regex,
+        match_per_line: arguments
+            .get("match_per_line")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         extension: arguments.get("extension").and_then(Value::as_str),
         min_size: arguments.get("min_size").and_then(Value::as_u64),
         max_size: arguments.get("max_size").and_then(Value::as_u64),
@@ -208,6 +221,7 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         .and_then(Value::as_bool)
         .unwrap_or(true);
     let mut results = Vec::new();
+    let mut flat_results = Vec::new();
 
     if !Path::new(path_str).exists() {
         return Err(format!("Path does not exist: {path_str}"));
@@ -219,7 +233,9 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
         .build()
         .flatten()
     {
-        if results.len() >= options.limit {
+        if (options.match_per_line && flat_results.len() >= options.limit)
+            || (!options.match_per_line && results.len() >= options.limit)
+        {
             break;
         }
 
@@ -250,14 +266,33 @@ pub fn run(arguments: &Value) -> Result<Value, String> {
             }
         }
 
-        results.push(FileResult {
-            path: path.display().to_string(),
-            size,
-            matches: file_matches,
-        });
+        if options.match_per_line {
+            for m in file_matches {
+                flat_results.push(FlatMatch {
+                    path: path.display().to_string(),
+                    line_number: m.line_number,
+                    line_content: m.line_content,
+                });
+                if flat_results.len() >= options.limit {
+                    break;
+                }
+            }
+        } else {
+            results.push(FileResult {
+                path: path.display().to_string(),
+                size,
+                matches: file_matches,
+            });
+        }
     }
 
+    let final_output = if options.match_per_line {
+        json!(flat_results)
+    } else {
+        json!(results)
+    };
+
     Ok(
-        json!([{ "type": "text", "text": serde_json::to_string_pretty(&results).unwrap_or_default() }]),
+        json!([{ "type": "text", "text": serde_json::to_string_pretty(&final_output).unwrap_or_default() }]),
     )
 }

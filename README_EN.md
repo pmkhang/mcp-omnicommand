@@ -91,6 +91,10 @@ omnicommand --version
   ```json
   { "name": "node", "force": true }
   ```
+- **Find all lines with 'FIXME' (flat mode)**:
+  ```bash
+  omnicommand find_file --path "./src" --content "FIXME" --match_per_line true
+  ```
 - **Search for Rust files**:
   ```bash
   omnicommand find_file --path "C:\my_project" --pattern "*.rs"

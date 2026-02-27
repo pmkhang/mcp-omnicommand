@@ -76,7 +76,7 @@ omnicommand process_kill --name "bun"
 | `process_kill`    | Tắt tiến trình bằng PID hoặc tên.     | `pid`, `name`, `force`                                     |
 | `process_cleanup` | Dọn dẹp các tiến trình shell bị treo. | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
 | `list_directory`  | Liệt kê thư mục (hỗ trợ gitignore).   | `path`, `max_depth`, `dirs_first`, `pattern`               |
-| `find_file`       | Tìm file theo tên, regex, nội dung.   | `path`, `pattern`, `content`, `is_regex`                   |
+| `find_file`       | Tìm file theo tên, regex, nội dung.   | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
 
 ## 📖 Ví dụ nâng cao
 
@@ -87,6 +87,10 @@ omnicommand process_kill --name "bun"
 - **Tắt tất cả Node process treo**:
   ```json
   { "name": "node", "force": true }
+  ```
+- **Tìm tất cả dòng có chữ 'FIXME' (dạng phẳng)**:
+  ```bash
+  omnicommand find_file --path "./src" --content "FIXME" --match_per_line true
   ```
 - **Tìm kiếm file Rust**:
   ```bash
