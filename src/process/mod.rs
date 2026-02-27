@@ -48,7 +48,6 @@ pub fn is_safe_command(cmd: &str) -> bool {
     true
 }
 
-/// Thực hiện Force Kill theo Tree tiến trình
 #[cfg(windows)]
 pub fn force_kill_tree(pid: u32) {
     let mut kill_cmd = Command::new("taskkill");
@@ -71,7 +70,6 @@ pub fn force_kill_tree(pid: u32) {
     let _ = kill_cmd.status();
 }
 
-/// Helper function to limit string length
 fn truncate_to_bytes(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
@@ -81,6 +79,16 @@ fn truncate_to_bytes(s: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     s[..end].to_string()
+}
+
+fn validate_args(command_str: &str, cwd_opt: Option<&str>) -> Result<(), String> {
+    if !is_safe_command(command_str) {
+        return Err("Command rejected by security blacklist".to_string());
+    }
+    if let Some(cwd) = cwd_opt.filter(|c| !Path::new(c).is_dir()) {
+        return Err(format!("Invalid working directory: {cwd}"));
+    }
+    Ok(())
 }
 
 fn setup_stdio(cmd: &mut TokioCommand, log_file: Option<&str>) -> Result<Option<String>, String> {
@@ -103,29 +111,41 @@ fn setup_stdio(cmd: &mut TokioCommand, log_file: Option<&str>) -> Result<Option<
     }
 }
 
-async fn handle_foreground_process(
+async fn monitor_process(
     mut child: Child,
     timeout_ms: u64,
-    pid: u32,
+    background: bool,
     log_path_opt: Option<String>,
 ) -> Result<CommandResponse, String> {
+    let pid = child.id().unwrap_or(0);
+    drop(child.stdin.take());
+
+    if background {
+        let msg = if let Some(path) = log_path_opt {
+            format!("Process started in background. PID: {pid}. Logs: {path}")
+        } else {
+            format!("Process started in background. PID: {pid}")
+        };
+        return Ok(CommandResponse {
+            stdout: msg,
+            stderr: String::new(),
+            exit_code: 0,
+            timeout: false,
+            error: None,
+        });
+    }
+
     if log_path_opt.is_some() {
         let status = timeout(Duration::from_millis(timeout_ms), child.wait()).await;
         match status {
             Ok(Ok(s)) => Ok(CommandResponse {
                 stdout: "Output redirected to file".to_string(),
                 stderr: String::new(),
-                exit_code: s.code().unwrap_or(1),
+                exit_code: s.code().unwrap_or(0),
                 timeout: false,
                 error: None,
             }),
-            Ok(Err(e)) => Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Wait failed: {e}")),
-            }),
+            Ok(Err(e)) => Err(format!("Wait failed: {e}")),
             Err(_) => {
                 if pid > 0 {
                     force_kill_tree(pid);
@@ -150,18 +170,12 @@ async fn handle_foreground_process(
                 Ok(CommandResponse {
                     stdout: truncate_to_bytes(&stdout_str, max_output_bytes),
                     stderr: truncate_to_bytes(&stderr_str, max_output_bytes),
-                    exit_code: output.status.code().unwrap_or(1),
+                    exit_code: output.status.code().unwrap_or(0),
                     timeout: false,
                     error: None,
                 })
             }
-            Ok(Err(e)) => Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Wait failed: {e}")),
-            }),
+            Ok(Err(e)) => Err(format!("Wait failed: {e}")),
             Err(_) => {
                 if pid > 0 {
                     force_kill_tree(pid);
@@ -178,85 +192,15 @@ async fn handle_foreground_process(
     }
 }
 
-async fn monitor_process(
-    mut child: Child,
-    timeout_ms: u64,
-    background: bool,
-    wait_ms: u64,
-    log_path_opt: Option<String>,
-) -> Result<CommandResponse, String> {
-    let pid = child.id().unwrap_or(0);
-    drop(child.stdin.take());
-
-    if background {
-        match timeout(Duration::from_millis(wait_ms), child.wait()).await {
-            Ok(Ok(status)) => {
-                return Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: status.code().unwrap_or(1),
-                    timeout: false,
-                    error: Some("Process exited prematurely".to_string()),
-                });
-            }
-            Ok(Err(e)) => {
-                return Ok(CommandResponse {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 1,
-                    timeout: false,
-                    error: Some(format!("Wait failed: {e}")),
-                });
-            }
-            Err(_) => {
-                let msg = if let Some(path) = log_path_opt {
-                    format!("Process started in background. PID: {pid}. Logs: {path}")
-                } else {
-                    format!("Process started in background. PID: {pid}")
-                };
-                return Ok(CommandResponse {
-                    stdout: msg,
-                    stderr: String::new(),
-                    exit_code: 0,
-                    timeout: false,
-                    error: None,
-                });
-            }
-        }
-    }
-
-    handle_foreground_process(child, timeout_ms, pid, log_path_opt).await
-}
-
-/// Thực thi một lệnh với shell tùy chọn và anti-hang protections
 pub async fn exec_cmd(
     command_str: &str,
     cwd_opt: Option<&str>,
     timeout_ms: u64,
     shell_opt: Option<&str>,
     background: bool,
-    wait_ms: u64,
     log_file: Option<&str>,
 ) -> Result<CommandResponse, String> {
-    if !is_safe_command(command_str) {
-        return Ok(CommandResponse {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 1,
-            timeout: false,
-            error: Some("Command rejected by security blacklist".to_string()),
-        });
-    }
-
-    if let Some(cwd) = cwd_opt.filter(|c| !Path::new(c).is_dir()) {
-        return Ok(CommandResponse {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 1,
-            timeout: false,
-            error: Some(format!("Invalid working directory: {cwd}")),
-        });
-    }
+    validate_args(command_str, cwd_opt)?;
 
     let mut cmd = if cfg!(windows) {
         let shell = shell_opt.unwrap_or("cmd.exe");
@@ -278,55 +222,22 @@ pub async fn exec_cmd(
 
     let log_path_opt = setup_stdio(&mut cmd, log_file)?;
     cmd.stdin(Stdio::piped());
-
     if let Some(cwd) = cwd_opt {
         cmd.current_dir(cwd);
     }
 
-    let child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Spawn failed: {e}")),
-            });
-        }
-    };
-
-    monitor_process(child, timeout_ms, background, wait_ms, log_path_opt).await
+    let child = cmd.spawn().map_err(|e| format!("Spawn failed: {e}"))?;
+    monitor_process(child, timeout_ms, background, log_path_opt).await
 }
 
-/// Chạy `PowerShell` an toàn với Base64 Encoded Command
 pub async fn exec_powershell(
     command_str: &str,
     cwd_opt: Option<&str>,
     timeout_ms: u64,
     background: bool,
-    wait_ms: u64,
     log_file: Option<&str>,
 ) -> Result<CommandResponse, String> {
-    if !is_safe_command(command_str) {
-        return Ok(CommandResponse {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 1,
-            timeout: false,
-            error: Some("Command rejected by security blacklist".to_string()),
-        });
-    }
-
-    if let Some(cwd) = cwd_opt.filter(|c| !Path::new(c).is_dir()) {
-        return Ok(CommandResponse {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 1,
-            timeout: false,
-            error: Some(format!("Invalid working directory: {cwd}")),
-        });
-    }
+    validate_args(command_str, cwd_opt)?;
 
     let utf16_bytes: Vec<u16> = command_str.encode_utf16().collect();
     let mut u8_bytes = Vec::with_capacity(utf16_bytes.len() * 2);
@@ -356,23 +267,10 @@ pub async fn exec_powershell(
 
     let log_path_opt = setup_stdio(&mut cmd, log_file)?;
     cmd.stdin(Stdio::piped());
-
     if let Some(cwd) = cwd_opt {
         cmd.current_dir(cwd);
     }
 
-    let child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return Ok(CommandResponse {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1,
-                timeout: false,
-                error: Some(format!("Spawn failed: {e}")),
-            });
-        }
-    };
-
-    monitor_process(child, timeout_ms, background, wait_ms, log_path_opt).await
+    let child = cmd.spawn().map_err(|e| format!("Spawn failed: {e}"))?;
+    monitor_process(child, timeout_ms, background, log_path_opt).await
 }
