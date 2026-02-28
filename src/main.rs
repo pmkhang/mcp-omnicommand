@@ -3,7 +3,7 @@ mod process;
 mod server;
 mod tools;
 
-pub const SERVER_VERSION: &str = "1.1.0";
+pub const SERVER_VERSION: &str = "1.2.0";
 
 use std::env;
 
