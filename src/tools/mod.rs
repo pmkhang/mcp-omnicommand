@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 
 pub mod fetch_api;
 pub mod find_file;
+pub mod git_operations;
 pub mod list_directory;
 pub mod process_kill;
 pub mod process_list;
@@ -19,6 +20,7 @@ pub fn get_tools() -> Value {
         find_file::info(),
         tail_file::info(),
         wait_for::info(),
+        git_operations::info(),
     ])
 }
 
@@ -36,6 +38,7 @@ pub async fn handle_tool_call(
         "find_file" => find_file::run(arguments),
         "tail_file" => tail_file::run(arguments),
         "wait_for" => wait_for::run(arguments).await,
+        "git_operations" => git_operations::run(arguments, default_cwd).await,
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
