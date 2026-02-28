@@ -21,6 +21,9 @@ Một máy chủ MCP (Model Context Protocol) mạnh mẽ được viết bằng
   - Chờ đợi một điều kiện cụ thể: File xuất hiện, Port mở, hoặc Process kết thúc.
 - **Giao tiếp mạng (`fetch_api`)**:
   - Thực hiện các HTTP request (GET, POST, v.v.) trực tiếp từ dòng lệnh tương tự như `curl`.
+- **Git Operations Nâng cao (`git_operations`)**:
+  - Hỗ trợ Git trực tiếp không cần CLI: status, log, diff, branch, add, commit, push, pull, checkout.
+  - Tích hợp chuyên sâu như `stash` (lưu nháp), `reset` (unstaging), `merge` (gộp nhánh và bắt xung đột), `fetch` (tải remote ref), và `tag` (quản lý phiên bản).
 - **Chế độ Hybrid CLI**: Chạy như một MCP Server hoặc như một công cụ dòng lệnh (CLI) độc lập.
 - **Bảo mật**: Tích hợp danh sách đen (blacklist) ngăn chặn các lệnh nguy hiểm (rm -rf, format, v.v.).
 
@@ -84,17 +87,18 @@ omni process_kill --name "bun"
 
 ## 🛠 Các công cụ (Tools) sẵn có
 
-| Tool              | Mô tả                                  | Tham số chính                                              |
-| :---------------- | :------------------------------------- | :--------------------------------------------------------- |
-| `run_command`     | Chạy một hoặc nhiều lệnh shell.        | `command`, `background`, `logFile`, `shell`, `runParallel` |
-| `process_list`    | Liệt kê các tiến trình đang chạy.      | `filter`                                                   |
-| `process_kill`    | Tắt tiến trình bằng PID hoặc tên.      | `pid`, `name`, `force`                                     |
-| `process_cleanup` | Dọn dẹp các tiến trình shell bị treo.  | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
-| `list_directory`  | Liệt kê thư mục (hỗ trợ gitignore).    | `path`, `max_depth`, `dirs_first`, `pattern`               |
-| `find_file`       | Tìm file theo tên, regex, nội dung.    | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
-| `tail_file`       | Đọc N dòng cuối của file.              | `path`, `lines`                                            |
-| `wait_for`        | Đợi Port, File, hoặc Process kết thúc. | `strategy`, `target`, `timeout`, `interval`                |
-| `fetch_api`       | Thực hiện HTTP request (curl-like).    | `url`, `method`, `headers`, `body`, `timeout`              |
+| Tool              | Mô tả                                            | Tham số chính                                              |
+| :---------------- | :----------------------------------------------- | :--------------------------------------------------------- |
+| `run_command`     | Chạy một hoặc nhiều lệnh shell.                  | `command`, `background`, `logFile`, `shell`, `runParallel` |
+| `process_list`    | Liệt kê các tiến trình đang chạy.                | `filter`                                                   |
+| `process_kill`    | Tắt tiến trình bằng PID hoặc tên.                | `pid`, `name`, `force`                                     |
+| `process_cleanup` | Dọn dẹp các tiến trình shell bị treo.            | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
+| `list_directory`  | Liệt kê thư mục (hỗ trợ gitignore).              | `path`, `max_depth`, `dirs_first`, `pattern`               |
+| `find_file`       | Tìm file theo tên, regex, nội dung.              | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
+| `tail_file`       | Đọc N dòng cuối của file.                        | `path`, `lines`                                            |
+| `wait_for`        | Đợi Port, File, hoặc Process kết thúc.           | `strategy`, `target`, `timeout`, `interval`                |
+| `fetch_api`       | Thực hiện HTTP request (curl-like).              | `url`, `method`, `headers`, `body`, `timeout`              |
+| `git_operations`  | Tương tác mã nguồn Git (status, pull, merge...). | `op`, `cwd`, `target`, `message`, `files`                  |
 
 ## 📖 Ví dụ nâng cao
 

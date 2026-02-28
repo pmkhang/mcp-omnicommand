@@ -21,6 +21,9 @@ A powerful MCP (Model Context Protocol) server written in Rust, allowing AI mode
   - Wait for specific conditions: File existence, Port reachability, or Process termination.
 - **Network Communication (`fetch_api`)**:
   - Make HTTP requests (GET, POST, etc.) directly from the command line like `curl`.
+- **Advanced Git Operations (`git_operations`)**:
+  - Perform Git interactions natively via MCP context: status, log, diff, branch, add, commit, push, pull, checkout.
+  - Deep integration including `stash` (shelving changes), `reset` (unstaging context), `merge` (conflict catching loops), `fetch`, and version tags.
 - **Hybrid CLI Mode**: Runs as an MCP Server or as a standalone Command Line Interface (CLI) tool.
 - **Security**: Integrated blacklist to prevent dangerous commands (`rm -rf`, `format`, etc.).
 
@@ -87,17 +90,18 @@ omni --version
 
 ## 🛠 Available Tools
 
-| Tool              | Description                         | Key Parameters                                             |
-| :---------------- | :---------------------------------- | :--------------------------------------------------------- |
-| `run_command`     | Run one or more shell commands.     | `command`, `background`, `logFile`, `shell`, `runParallel` |
-| `process_list`    | List running processes.             | `filter`                                                   |
-| `process_kill`    | Kill a process by PID or name.      | `pid`, `name`, `force`                                     |
-| `process_cleanup` | Clean up hanging shell processes.   | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
-| `list_directory`  | List directory context (gitignore). | `path`, `max_depth`, `dirs_first`, `pattern`               |
-| `find_file`       | Find files by name, regex, content  | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
-| `tail_file`       | Read last N lines of a file.        | `path`, `lines`                                            |
-| `wait_for`        | Wait for Port, File, or Process.    | `strategy`, `target`, `timeout`, `interval`                |
-| `fetch_api`       | Make HTTP requests (curl-like).     | `url`, `method`, `headers`, `body`, `timeout`              |
+| Tool              | Description                          | Key Parameters                                             |
+| :---------------- | :----------------------------------- | :--------------------------------------------------------- |
+| `run_command`     | Run one or more shell commands.      | `command`, `background`, `logFile`, `shell`, `runParallel` |
+| `process_list`    | List running processes.              | `filter`                                                   |
+| `process_kill`    | Kill a process by PID or name.       | `pid`, `name`, `force`                                     |
+| `process_cleanup` | Clean up hanging shell processes.    | `maxAgeSeconds`, `dryRun`, `includeNode`                   |
+| `list_directory`  | List directory context (gitignore).  | `path`, `max_depth`, `dirs_first`, `pattern`               |
+| `find_file`       | Find files by name, regex, content   | `path`, `pattern`, `content`, `is_regex`, `match_per_line` |
+| `tail_file`       | Read last N lines of a file.         | `path`, `lines`                                            |
+| `wait_for`        | Wait for Port, File, or Process.     | `strategy`, `target`, `timeout`, `interval`                |
+| `fetch_api`       | Make HTTP requests (curl-like).      | `url`, `method`, `headers`, `body`, `timeout`              |
+| `git_operations`  | Perform comprehensive Git operations | `op`, `cwd`, `target`, `message`, `files`                  |
 
 ## 📖 Advanced Examples
 
