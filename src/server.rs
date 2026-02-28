@@ -81,7 +81,7 @@ fn handle_initialize(id: &Value, msg: &Value, default_cwd: &mut Option<String>) 
         "result": {
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "Omnicommand", "version": SERVER_VERSION }
+            "serverInfo": { "name": "omni", "version": SERVER_VERSION }
         }
     });
     send_response(&response);

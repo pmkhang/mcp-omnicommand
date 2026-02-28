@@ -1,4 +1,4 @@
-# Omnicommand (omnicommand-rs)
+# Omni (omni-rs)
 
 [Vietnamese Version](./README.md)
 
@@ -34,16 +34,26 @@ A powerful MCP (Model Context Protocol) server written in Rust, allowing AI mode
 
 ### Step 1: Automatic Installation
 
+If this is your **first time installing**, run this command to install and automatically add the omni directory to your PATH environment variable:
+
+```bash
+make first-install
+```
+
+(_Note: Once completed, you will see a success message. You must restart your terminal for the `omni` command to be recognized._)
+
+If you just want to reinstall or update to a new version:
+
 ```bash
 make install
 ```
 
-### Step 2: Add to PATH
+### Step 2: Add to PATH (Manual, if automatic fails)
 
-Add the installation directory to your PATH to use the `omnicommand` command everywhere:
+Add the installation directory to your PATH to use the `omni` command everywhere:
 
-- **Windows**: `%USERPROFILE%\.omnicommand\bin`
-- **Linux/macOS**: `~/.omnicommand/bin`
+- **Windows**: `%USERPROFILE%\.omni\bin`
+- **Linux/macOS**: `~/.omni/bin`
 
 ## ⚙️ MCP Configuration (Claude Desktop)
 
@@ -52,8 +62,8 @@ Configure in your `claude_desktop_config.json` file:
 ```json
 {
   "mcpServers": {
-    "omnicommand": {
-      "command": "omnicommand",
+    "omni": {
+      "command": "omni",
       "args": ["@mcp"]
     }
   }
@@ -62,17 +72,17 @@ Configure in your `claude_desktop_config.json` file:
 
 ## 🖥 Standalone CLI Mode (New)
 
-You can use `omnicommand` directly from the terminal without an MCP Client:
+You can use `omni` directly from the terminal without an MCP Client:
 
 ```powershell
 # Example: Run dev server in background and log to file
-omnicommand run_command --command "bun run dev" --background true --logFile "dev_server.log"
+omni run_command --command "bun run dev" --background true --logFile "dev_server.log"
 
 # Example: Kill a process natively by name
-omnicommand process_kill --name "bun"
+omni process_kill --name "bun"
 
 # Check version
-omnicommand --version
+omni --version
 ```
 
 ## 🛠 Available Tools
@@ -101,27 +111,27 @@ omnicommand --version
   ```
 - **Find all lines with 'FIXME' (flat mode)**:
   ```bash
-  omnicommand find_file --path "./src" --content "FIXME" --match_per_line true
+  omni find_file --path "./src" --content "FIXME" --match_per_line true
   ```
 - **Real-time log monitoring**:
   ```bash
-  omnicommand tail_file --path "dev_server.log" --lines 20
+  omni tail_file --path "dev_server.log" --lines 20
   ```
 - **Wait for server before proceeding**:
   ```bash
-  omnicommand wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
+  omni wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
   ```
 - **Make an HTTP request**:
   ```bash
-  omnicommand fetch_api --url "https://jsonplaceholder.typicode.com/posts/1"
+  omni fetch_api --url "https://jsonplaceholder.typicode.com/posts/1"
   ```
 - **Search for Rust files**:
   ```bash
-  omnicommand find_file --path "C:\my_project" --pattern "*.rs"
+  omni find_file --path "C:\my_project" --pattern "*.rs"
   ```
 - **List json files in src (dirs first)**:
   ```bash
-  omnicommand list_directory --path "./src" --pattern "*.json" --dirs_first true
+  omni list_directory --path "./src" --pattern "*.json" --dirs_first true
   ```
 
 ## ⚠️ Security Notes

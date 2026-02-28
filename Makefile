@@ -1,30 +1,34 @@
-# Makefile for omnicommand
+# Makefile for omni
 
 ifeq ($(OS),Windows_NT)
-    INSTALL_DIR = $(USERPROFILE)\.omnicommand\bin
-    MKDIR = if not exist "$(INSTALL_DIR)" mkdir "$(INSTALL_DIR)"
-    COPY = copy /Y target\release\omnicommand.exe "$(INSTALL_DIR)\omnicommand.exe"
-    PKILL = taskkill /F /IM omnicommand.exe /T 2>nul || ver >nul
+    INSTALL_DIR = $(USERPROFILE)\.omni\bin
+    MKDIR = mkdir "$(INSTALL_DIR)" 2>nul || ver >nul
+    COPY = copy /Y target\release\omni.exe "$(INSTALL_DIR)\omni.exe"
+    PKILL = taskkill /F /IM omni.exe /T 2>nul || ver >nul
+    ADD_PATH = powershell -Command "$$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($$currentPath -notmatch '\.omni\\bin') { [Environment]::SetEnvironmentVariable('PATH', $$currentPath + ';$(INSTALL_DIR)', 'User'); Write-Host 'Added $(INSTALL_DIR) to PATH (Please restart terminal)' }"
 else
-    INSTALL_DIR = $(HOME)/.omnicommand/bin
+    INSTALL_DIR = $(HOME)/.omni/bin
     MKDIR = mkdir -p "$(INSTALL_DIR)"
-    COPY = cp target/release/omnicommand "$(INSTALL_DIR)/omnicommand"
-    PKILL = pkill -f omnicommand || true
+    COPY = cp target/release/omni "$(INSTALL_DIR)/omni"
+    PKILL = pkill -f omni || true
+    ADD_PATH = if ! grep -q '$(INSTALL_DIR)' $(HOME)/.bashrc 2>/dev/null && ! grep -q '$(INSTALL_DIR)' $(HOME)/.zshrc 2>/dev/null; then echo 'export PATH="$$PATH:$(INSTALL_DIR)"' >> $(HOME)/.bashrc; echo 'Added $(INSTALL_DIR) to PATH in .bashrc (Please run source ~/.bashrc)'; fi
 endif
 
-.PHONY: all build install clean
+.PHONY: all release install clean
 
-all: build
+all: release install
 
-build:
+release:
+	$(PKILL)
 	cargo build --release
 
-install:
-	-$(PKILL)
-	$(MAKE) build
+install: release
 	$(MKDIR)
 	$(COPY)
-	@echo "Installed omnicommand to $(INSTALL_DIR)"
+	@echo "Installed omni to $(INSTALL_DIR)"
+
+first-install: install
+	@$(ADD_PATH)
 
 clean:
 	cargo clean

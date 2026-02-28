@@ -8,14 +8,14 @@ pub async fn run_standalone_cli(args: &[String]) {
 
     // Xử lý cờ phiên bản
     if tool_name == "--version" || tool_name == "-v" {
-        println!("Omnicommand version {SERVER_VERSION}");
+        println!("omni version {SERVER_VERSION}");
         return;
     }
 
     // Xử lý cờ help
     if tool_name == "--help" || tool_name == "-h" {
-        println!("Omnicommand CLI");
-        println!("Usage: omnicommand <tool_name> [--key value] [--key=value]\n");
+        println!("omni CLI");
+        println!("Usage: omni <tool_name> [--key value] [--key=value]\n");
         println!("Available tools:");
         if let Some(tools_arr) = tools::get_tools().as_array() {
             for tool in tools_arr {

@@ -28,3 +28,7 @@ build_error.log
 
 # Temporary
 /tmp/
+
+.agent/
+.agents/
+skills-lock.json

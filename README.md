@@ -1,4 +1,4 @@
-# Omnicommand (omnicommand-rs)
+# Omni (omni-rs)
 
 [English Version](./README_EN.md)
 
@@ -34,16 +34,26 @@ Một máy chủ MCP (Model Context Protocol) mạnh mẽ được viết bằng
 
 ### Bước 1: Cài đặt tự động
 
+Nếu đây là **lần cài đặt đầu tiên**, hãy chạy lệnh này để tự động cài đặt và thêm thư mục vào biến môi trường PATH:
+
+```bash
+make first-install
+```
+
+(_Lưu ý: Sau khi chạy, bạn copy dòng báo thành công và khởi động lại Terminal để hệ thống nhận diện lệnh `omni`._)
+
+Nếu bạn chỉ muốn cài đặt lại/cập nhật phiên bản mới:
+
 ```bash
 make install
 ```
 
-### Bước 2: Thêm vào PATH
+### Bước 2: Thêm vào PATH (Thủ công, nếu lệnh tự động thất bại)
 
-Thêm thư mục cài đặt vào PATH để dùng lệnh `omnicommand` ở mọi nơi:
+Thêm thư mục cài đặt vào PATH để dùng lệnh `omni` ở mọi nơi:
 
-- **Windows**: `%USERPROFILE%\.omnicommand\bin`
-- **Linux/macOS**: `~/.omnicommand/bin`
+- **Windows**: `%USERPROFILE%\.omni\bin`
+- **Linux/macOS**: `~/.omni/bin`
 
 ## ⚙️ Cấu hình MCP (Claude Desktop)
 
@@ -52,8 +62,8 @@ Cấu hình trong file `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "omnicommand": {
-      "command": "omnicommand",
+    "omni": {
+      "command": "omni",
       "args": ["@mcp"]
     }
   }
@@ -62,14 +72,14 @@ Cấu hình trong file `claude_desktop_config.json`:
 
 ## 🖥 Chế độ CLI Độc lập (Mới)
 
-Bạn có thể sử dụng `omnicommand` trực tiếp từ terminal mà không cần MCP Client:
+Bạn có thể sử dụng `omni` trực tiếp từ terminal mà không cần MCP Client:
 
 ```powershell
 # Ví dụ chạy server ngầm và ghi log
-omnicommand run_command --command "bun run dev" --background true --logFile "dev_server.log"
+omni run_command --command "bun run dev" --background true --logFile "dev_server.log"
 
 # Ví dụ tắt process native theo tên
-omnicommand process_kill --name "bun"
+omni process_kill --name "bun"
 ```
 
 ## 🛠 Các công cụ (Tools) sẵn có
@@ -98,27 +108,27 @@ omnicommand process_kill --name "bun"
   ```
 - **Tìm tất cả dòng có chữ 'FIXME' (dạng phẳng)**:
   ```bash
-  omnicommand find_file --path "./src" --content "FIXME" --match_per_line true
+  omni find_file --path "./src" --content "FIXME" --match_per_line true
   ```
 - **Theo dõi log real-time**:
   ```bash
-  omnicommand tail_file --path "dev_server.log" --lines 20
+  omni tail_file --path "dev_server.log" --lines 20
   ```
 - **Chờ server sẵn sàng rổi mới chạy tiếp**:
   ```bash
-  omnicommand wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
+  omni wait_for --strategy "port" --target "127.0.0.1:8080" --timeout 60000
   ```
 - **Gọi HTTP API**:
   ```bash
-  omnicommand fetch_api --url "https://jsonplaceholder.typicode.com/posts/1"
+  omni fetch_api --url "https://jsonplaceholder.typicode.com/posts/1"
   ```
 - **Tìm kiếm file Rust**:
   ```bash
-  omnicommand find_file --path "C:\my_project" --pattern "*.rs"
+  omni find_file --path "C:\my_project" --pattern "*.rs"
   ```
 - **Liệt kê file json trong src (dirs first)**:
   ```bash
-  omnicommand list_directory --path "./src" --pattern "*.json" --dirs_first true
+  omni list_directory --path "./src" --pattern "*.json" --dirs_first true
   ```
 
 ## ⚠️ Lưu ý bảo mật
