@@ -38,6 +38,7 @@ struct GitDiffStat {
     pub insertions: u32,
     pub deletions: u32,
     pub change_type: String, // "modified", "added", "deleted", "renamed"
+    pub binary: bool,
 }
 
 #[derive(Serialize)]
@@ -372,7 +373,11 @@ fn run_log(runner: &GitRunner, arguments: &Value) -> Result<Value, String> {
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(20);
     let limit_str = format!("-{limit_usize}");
-    let out = runner.run(&["log", "--pretty=format:%H|%h|%an|%ai|%s", &limit_str])?;
+    let out = runner.run(&[
+        "log",
+        "--pretty=format:%H%x1f%h%x1f%an%x1f%ai%x1f%s",
+        &limit_str,
+    ])?;
 
     let mut commits = Vec::new();
     if out.is_empty() {
@@ -380,7 +385,7 @@ fn run_log(runner: &GitRunner, arguments: &Value) -> Result<Value, String> {
     }
 
     for line in out.lines() {
-        let parts: Vec<&str> = line.splitn(5, '|').collect();
+        let parts: Vec<&str> = line.splitn(5, '\x1f').collect();
         if parts.len() == 5 {
             commits.push(GitCommit {
                 hash: parts[0].to_string(),
@@ -454,6 +459,7 @@ fn run_diff(runner: &GitRunner, arguments: &Value) -> Result<Value, String> {
         }
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() == 3 {
+            let binary = parts[0].trim() == "-" || parts[1].trim() == "-";
             let insertions = parts[0].parse::<u32>().unwrap_or(0);
             let deletions = parts[1].parse::<u32>().unwrap_or(0);
             let file = parts[2].trim().to_string();
@@ -466,6 +472,7 @@ fn run_diff(runner: &GitRunner, arguments: &Value) -> Result<Value, String> {
                     .get(&file)
                     .cloned()
                     .unwrap_or_else(|| "modified".to_string()),
+                binary,
             });
         }
     }
@@ -797,7 +804,7 @@ fn run_checkout(runner: &GitRunner, arguments: &Value) -> Result<Value, String> 
     let previous_ref = runner.run(&["rev-parse", "--abbrev-ref", "HEAD"])?;
 
     if let Some(file) = restore {
-        runner.run(&["checkout", "--", file])?;
+        runner.run(&["restore", file])?;
         return Ok(json!(GitCheckoutResult {
             ref_name: previous_ref.clone(),
             previous_ref,
@@ -876,8 +883,9 @@ fn run_stash(runner: &GitRunner, arguments: &Value) -> Result<Value, String> {
         }
         "save" => {
             let msg = arguments.get("message").and_then(|v| v.as_str());
-            let mut args = vec!["stash", "save"];
+            let mut args = vec!["stash", "push"];
             if let Some(m) = msg {
+                args.push("-m");
                 args.push(m);
             }
             let (stdout, stderr, success) = runner.run_with_stderr(&args);
